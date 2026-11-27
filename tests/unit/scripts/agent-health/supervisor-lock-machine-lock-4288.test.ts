@@ -1386,6 +1386,14 @@ const WRAP_LIST_RACE = `${orig('lock_obs_list')}lock_obs_list() { if [ "$1" = lo
 const KILL0_EPERM = 'pid@@1=EPERM';
 
 const PIN_CLOCK = `${orig('lock_now_ms')}eval "orig2_$(declare -f machine_lock_pid_identity)"\nmachine_lock_pid_identity() { local t rc; t=$(orig_lock_now_ms); lock_now_ms() { echo "$t"; }; orig2_machine_lock_pid_identity "$@"; rc=$?; lock_now_ms() { orig_lock_now_ms; }; return $rc; }\n`;
+/**
+ * #4636: the same pin for a ticket's `pid-reused` verdict. lock_pid_start_ms (verify-run.sh) reads the clock before and
+ * after `ps -o etime=` and answers nothing (return 3) when the reads are 1 s or more apart: the ticket is then waited for.
+ * lock_now_ms falls back to whole seconds where `date` has no %N (macOS), so a second boundary between the two reads is
+ * enough, and a slow `ps` under load more so — F32's positive control read `refused`. Pinned inside this one function,
+ * the verdict it asserts does not depend on how long `ps` took; everything else still reads the real clock.
+ */
+const PIN_CLOCK_TICKET = `${orig('lock_now_ms')}eval "orig2_$(declare -f lock_pid_start_ms)"\nlock_pid_start_ms() { local t rc; t=$(orig_lock_now_ms); lock_now_ms() { echo "$t"; }; orig2_lock_pid_start_ms "$@"; rc=$?; lock_now_ms() { orig_lock_now_ms; }; return $rc; }\n`;
 
 // ---- the end state of the base: everything under it except the queue (dirs as '', files as their text)
 type Snap = Record<string, string>;
@@ -2270,7 +2278,7 @@ describe('Issue #4288 PR1c lib.sh details the tables do not name (PM Claude P3-2
   it('F32 positive control: without the failing etime, the process of the ticket ahead started after the ticket was made — the ticket is retired and the lock taken', () => {
     const base = mkTmp('cm-sup-lock-');
     placeTicketAhead(base, 1000);
-    const res = bashLib(base, `product_lock_acquire t; rc=$?\n${REPORT}`, {});
+    const res = bashLib(base, `${PIN_CLOCK_TICKET}product_lock_acquire t; rc=$?\n${REPORT}`, {});
     const ran = parseReport(res.stdout, res.stderr, base);
     expect(ran.result, res.stderr).toBe('acquired');
   });
