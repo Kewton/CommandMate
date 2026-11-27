@@ -219,6 +219,15 @@ describe('表 C: the count / wait entry', () => {
     expect(m.err[0]).toContain('1 heavy run(s): 700 node /work/b/node_modules/.bin/vitest run');
   });
 
+  it('wait: the stderr line names the pid and the whole args of every run it waits for (what to look at to stop it)', async () => {
+    const { main } = await loadHeavy();
+    const two = `${BUSY}  730     1 bash bash /w/scripts/verify-run.sh --gates unit --extra a b c\n`;
+    const m = fakeMachine([two, IDLE]);
+    expect(main(['wait'], m.deps)).toBe(0);
+    expect(m.err).toHaveLength(1);
+    expect(m.err[0]).toContain('2 heavy run(s): 700 node /work/b/node_modules/.bin/vitest run | 730 bash /w/scripts/verify-run.sh --gates unit --extra a b c');
+  });
+
   it('wait: one stderr line at the start and then every 5 min, no default limit', async () => {
     const { main } = await loadHeavy();
     // 41 busy reads: 40 sleeps of 15 s = 10 min, then none.
@@ -269,16 +278,50 @@ describe('表 B: the real wait is given only by each entry (I6)', () => {
   });
 });
 
+describe("表 B: only precheck's entry leaves the other prechecks out of its wait (precheckPeers: false)", () => {
+  // precheck waits before every heavy step, while it is itself a `node … precheck.mjs` row: counting the
+  // other prechecks would make two of them wait for each other for ever. The other three tools are never
+  // counted while they wait, and count a precheck as v4 does.
+  const ENTRY_PEERS: { file: string; peersOff: boolean }[] = [
+    { file: 'precheck.mjs', peersOff: true },
+    { file: 'wait-verify.mjs', peersOff: false },
+    { file: 'merge-pr.mjs', peersOff: false },
+    { file: 'merge-train.mjs', peersOff: false },
+  ];
+  it.each(ENTRY_PEERS)('$file: precheckPeers: false given by its entry = $peersOff', ({ file, peersOff }) => {
+    const text = fs.readFileSync(path.join(REPO_ROOT, 'scripts/orchestrate', file), 'utf8');
+    const entry = text.slice(text.lastIndexOf('\nif (isMain)'));
+    const waiters = [...entry.matchAll(/heavyWaiter\(\{([^}]*)\}\)/g)].map((m) => m[1]);
+    expect(waiters.length).toBeGreaterThan(0);
+    for (const options of waiters) {
+      expect(/\bprecheckPeers:\s*false\b/.test(options)).toBe(peersOff);
+      if (!peersOff) expect(options).not.toContain('precheckPeers');
+    }
+  });
+});
+
 // --- wait-verify ------------------------------------------------------------
 
 const PASS_LOG = ['Completed: wt-1 (basis=hook_stop)', 'Verifying: wt-1 (run 12)', 'GATE lint PASS (exit=0, 1.0s)', 'RESULT passed', ''].join('\n');
 const T0 = Date.UTC(2026, 10, 27, 1, 0);
 const iso = (minute: number) => new Date(T0 + minute * 60_000).toISOString();
 
-/** commandmatedev and git faked; the verification run started at 01:05, the last commit at `commitMinute`. */
-function waitVerifyHarness({ commitMinute = 3, withWait = true } = {}) {
+const BUSY_VERIFY_LOG = "Error: A verification run is already in progress for 'wt-1' (run 11). Wait for it to finish, then retry.\n";
+/** Gates with the `[timing]` marker, so the record carries queueSec / mutexSec / runSec. */
+const TIMED_GATES = [
+  { gateId: 'lint', status: 'passed', exitCode: 0, durationMs: 40_000, logTail: '[timing] queue=4.0s mutex=0.0s run=40.0s' },
+  { gateId: 'unit-related', status: 'passed', exitCode: 0, durationMs: 600_000, logTail: 'ok\n[timing] queue=30.0s mutex=120.0s run=600.0s' },
+];
+
+/**
+ * commandmatedev and git faked; the verification run started at 01:05, the last commit at `commitMinute`.
+ * `busyFirst`: the first verify finds another run of the worktree going (exit 99), which then ends.
+ * `waitMs`: what the fake wait moves the clock by.
+ */
+function waitVerifyHarness({ commitMinute = 3, withWait = true, busyFirst = false, waitMs = 0 } = {}) {
   const events: string[] = [];
   let clock = T0;
+  let verifies = 0;
   const worktree = path.join(tmp, 'wt');
   fs.mkdirSync(worktree, { recursive: true });
   const ok = (stdout: string) => ({ status: 0, stdout, stderr: '' });
@@ -286,6 +329,10 @@ function waitVerifyHarness({ commitMinute = 3, withWait = true } = {}) {
     spawnToLog: (_command: string, args: string[], { logFile }: { logFile: string }) => {
       events.push(args[0]);
       fs.mkdirSync(path.dirname(logFile), { recursive: true });
+      if (args[0] === 'verify' && busyFirst && verifies++ === 0) {
+        fs.writeFileSync(logFile, BUSY_VERIFY_LOG);
+        return 99;
+      }
       fs.writeFileSync(logFile, PASS_LOG);
       clock += 600_000;
       return 0;
@@ -300,7 +347,7 @@ function waitVerifyHarness({ commitMinute = 3, withWait = true } = {}) {
       }
       if (args[0] === 'task' && args[1] === 'list') return ok('[]');
       if (args[0] === 'task' && args[1] === 'show') return { status: 1, stdout: '', stderr: 'not found' };
-      if (args[0] === 'verify' && args[1] === 'show') return ok(JSON.stringify({ run: { id: Number(args[2]), worktreeId: 'wt-1', status: 'passed', startedAt: iso(5) } }));
+      if (args[0] === 'verify' && args[1] === 'show') return ok(JSON.stringify({ run: { id: Number(args[2]), worktreeId: 'wt-1', status: 'passed', startedAt: iso(5), gates: TIMED_GATES } }));
       if (args[0] === 'verify' && args[1] === 'history') return ok(JSON.stringify([{ id: 12, startedAt: iso(5) }]));
       if (args[0] === 'capture' && args.includes('--json')) return ok(JSON.stringify({ lastStopEventAt: T0 + 4 * 60_000, autoYes: { enabled: false } }));
       if (args[0] === 'auto-yes') return ok('');
@@ -314,7 +361,14 @@ function waitVerifyHarness({ commitMinute = 3, withWait = true } = {}) {
     home: tmp,
     log: () => {},
     error: () => {},
-    ...(withWait ? { waitHeavy: () => events.push('heavy') } : {}),
+    ...(withWait
+      ? {
+          waitHeavy: () => {
+            events.push('heavy');
+            clock += waitMs;
+          },
+        }
+      : {}),
   };
   const runDir = path.join(tmp, 'runs', '2026-11-27');
   const argv = (...extra: string[]) => [
@@ -343,14 +397,37 @@ describe('表 B: wait-verify waits before every verify it starts (重なり: wai
     expect(h.events).toEqual(['wait', 'heavy', 'verify']);
   });
 
+  it('the retry after another run of the worktree kept the first from starting (busy, attempt 2)', () => {
+    const h = waitVerifyHarness({ busyFirst: true });
+    expect(waitVerifyMain(h.argv(), h.deps)).toBe(0);
+    expect(h.events).toEqual(['wait', 'heavy', 'verify', 'heavy', 'verify']);
+  });
+
+  it('I4: a wait of 600 s adds 600 to durationSec only; queueSec / mutexSec / runSec and the result stay', () => {
+    // The two harnesses share one run dir: each record is read right after its own run.
+    const plain = waitVerifyHarness();
+    expect(waitVerifyMain(plain.argv(), plain.deps)).toBe(0);
+    const a = plain.record();
+    const waited = waitVerifyHarness({ waitMs: 600_000 });
+    expect(waitVerifyMain(waited.argv(), waited.deps)).toBe(0);
+    const b = waited.record();
+    expect(a.queueSec).toBe(34);
+    expect(b.durationSec).toBe(a.durationSec + 600);
+    expect({ result: b.result, queueSec: b.queueSec, mutexSec: b.mutexSec, runSec: b.runSec }).toEqual({
+      result: a.result, queueSec: a.queueSec, mutexSec: a.mutexSec, runSec: a.runSec,
+    });
+  });
+
   it('negative control (I4 / I6): main without waitHeavy waits for nothing and records the same result', () => {
     const plain = waitVerifyHarness({ withWait: false });
     expect(waitVerifyMain(plain.argv(), plain.deps)).toBe(0);
     expect(plain.events).toEqual(['wait', 'verify']);
+    const a = plain.record();
     const waited = waitVerifyHarness();
     expect(waitVerifyMain(waited.argv(), waited.deps)).toBe(0);
-    expect(waited.record().result).toBe(plain.record().result);
-    expect(waited.record().durationSec).toBe(plain.record().durationSec);
+    const b = waited.record();
+    expect(b.result).toBe(a.result);
+    expect(b.durationSec).toBe(a.durationSec);
   });
 });
 
@@ -358,8 +435,22 @@ describe('表 B: wait-verify waits before every verify it starts (重なり: wai
 
 const manyTests = Array.from({ length: HEAVY_TEST_FILES }, (_, i) => `tests/unit/many/t${i}.test.ts`);
 
-function precheckHarness({ changed = ['scripts/orchestrate/precheck.mjs'], naming = [] as string[], withWait = true } = {}) {
+/**
+ * precheck with git, the steps and cpu.heavy faked. `relatedTests`: estimateRelatedTests' count (50 on makes
+ * `related` a wide step). `lockWaitMs`: what the fake lock says it waited. `waitMs`: what the fake wait moves
+ * the clock by. `waitHeavy`: a wait of the test's own instead of the recording one.
+ */
+function precheckHarness({
+  changed = ['scripts/orchestrate/precheck.mjs'],
+  naming = [] as string[],
+  withWait = true,
+  relatedTests = 0,
+  lockWaitMs = 0,
+  waitMs = 0,
+  waitHeavy = null as null | ((events: string[]) => void),
+} = {}) {
   const events: string[] = [];
+  let clock = T0;
   // Each harness its own home and run dir: a second precheck at the same HEAD would otherwise find the first's record.
   const own = fs.mkdtempSync(path.join(tmp, 'precheck-'));
   const deps = {
@@ -379,16 +470,24 @@ function precheckHarness({ changed = ['scripts/orchestrate/precheck.mjs'], namin
       return { status: 0, stdout: '', stderr: '' };
     },
     findTestsNaming: () => naming,
-    estimateRelatedTests: () => 0,
+    estimateRelatedTests: () => relatedTests,
     acquireHeavyLock: () => {
       events.push('lock');
-      return { acquired: true, waitedMs: 0, heldBy: null, release: () => {} };
+      return { acquired: true, waitedMs: lockWaitMs, heldBy: null, release: () => {} };
     },
     home: own,
-    now: () => new Date(T0),
+    now: () => new Date(clock),
     log: () => {},
     error: (line: string) => events.push(`error ${line}`),
-    ...(withWait ? { waitHeavy: () => events.push('heavy') } : {}),
+    ...(withWait
+      ? {
+          waitHeavy: () => {
+            if (waitHeavy) return waitHeavy(events);
+            events.push('heavy');
+            clock += waitMs;
+          },
+        }
+      : {}),
   };
   const runDir = path.join(own, 'runs', '2026-11-27');
   const argv = (...extra: string[]) => ['--run-dir', runDir, '--issues', '4631', '--issue', '4631', '--worktree', path.join(tmp, 'wt'), ...extra];
@@ -398,24 +497,74 @@ function precheckHarness({ changed = ['scripts/orchestrate/precheck.mjs'], namin
 
 const startsHeavy = (e: string) => e.startsWith('run npx vitest') || e === 'run npm run build';
 
-describe('表 B: precheck waits once, before its first vitest / next build step (重なり: 待ちなしの vitest)', () => {
-  it('waits right before the first vitest step, after the light steps, and only once — positive control', () => {
+/** Each heavy step (vitest / `npm run build`) has the wait right before it, and no wait stands elsewhere. */
+function expectWaitBeforeEachHeavy(events: string[]) {
+  const heavySteps = events.filter(startsHeavy);
+  expect(heavySteps.length).toBeGreaterThan(0);
+  expect(events.filter((e) => e === 'heavy')).toHaveLength(heavySteps.length);
+  events.forEach((e, i) => {
+    if (e === 'heavy') expect(events.slice(i + 1).find((n) => n !== 'lock')).toSatisfy(startsHeavy);
+  });
+}
+
+describe('表 B: precheck waits before each vitest / next build step it starts (重なり: precheck の段の移りの隙間)', () => {
+  it('waits right before each vitest step, after the light steps — positive control', () => {
     const h = precheckHarness();
     expect(precheckMain(h.argv(), h.deps)).toBe(0);
     const first = h.events.findIndex(startsHeavy);
     expect(first).toBeGreaterThan(0);
     expect(h.events[first - 1]).toBe('heavy');
-    expect(h.events.filter((e) => e === 'heavy')).toHaveLength(1);
     expect(h.events.indexOf('run npx tsc')).toBeLessThan(first - 1);
+    expect(h.events.filter(startsHeavy)).toEqual(['run npx vitest related', 'run npx vitest run']);
+    expectWaitBeforeEachHeavy(h.events);
   });
 
-  it('waits before the lock of a wide step, and not again for the build steps (--build)', () => {
+  it('waits again before the build step (--build), and not before the light build:cli / build:server', () => {
     const h = precheckHarness({ naming: manyTests });
     expect(precheckMain(h.argv('--build'), h.deps)).toBe(0);
-    expect(h.events.filter((e) => e === 'heavy')).toHaveLength(1);
-    const heavyAt = h.events.indexOf('heavy');
-    expect(h.events.slice(heavyAt + 1).find((e) => e === 'lock' || startsHeavy(e))).toBe('run npx vitest related');
     expect(h.events).toContain('run npm run build');
+    expect(h.events[h.events.indexOf('run npm run build') - 1]).toBe('heavy');
+    expect(h.events[h.events.indexOf('run npm run build:cli') - 1]).not.toBe('heavy');
+    expectWaitBeforeEachHeavy(h.events);
+  });
+
+  it('a wide step first (related with 50 tests on): the wait, then the lock, then the step', () => {
+    const h = precheckHarness({ relatedTests: HEAVY_TEST_FILES });
+    expect(precheckMain(h.argv(), h.deps)).toBe(0);
+    const at = h.events.indexOf('heavy');
+    expect(h.events.slice(at, at + 3)).toEqual(['heavy', 'lock', 'run npx vitest related']);
+  });
+
+  it("A moving on from related waits for B's vitest that started in the gap (two prechecks, precheckPeers: false)", async () => {
+    const { waitForNoHeavy } = await loadHeavy();
+    // A (pid 10) and B (pid 20) are both `node … precheck.mjs`; B's vitest (21) runs while A is between steps.
+    const a = '  10     1 node node /w/a/scripts/orchestrate/precheck.mjs --issue 1\n';
+    const b = '  20     1 node node /w/b/scripts/orchestrate/precheck.mjs --issue 2\n';
+    const bVitest = '  21    20 node node /w/b/node_modules/.bin/vitest run tests/unit/guards\n';
+    const tables = [a + b, a + b + bVitest, a + b + bVitest, a + b];
+    let read = 0;
+    const h = precheckHarness({
+      waitHeavy: (events) => {
+        let sleeps = 0;
+        const waited = waitForNoHeavy({
+          readPs: () => ({ ok: true, text: tables[Math.min(read++, tables.length - 1)] }),
+          sleep: () => {
+            sleeps += 1;
+            if (sleeps > 100) throw new Error('the wait did not end');
+          },
+          now: () => 0,
+          error: () => {},
+          selfPid: 10,
+          precheckPeers: false,
+        });
+        events.push(`heavy sleeps=${sleeps} unreadable=${waited.unreadable}`);
+      },
+    });
+    expect(precheckMain(h.argv(), h.deps)).toBe(0);
+    const waits = h.events.filter((e) => e.startsWith('heavy'));
+    // Before related: B is only a precheck (not counted); before tests: B's vitest, two sleeps, then none.
+    expect(waits).toEqual(['heavy sleeps=0 unreadable=null', 'heavy sleeps=2 unreadable=null']);
+    expect(h.events[h.events.indexOf('run npx vitest run') - 1]).toBe('heavy sleeps=2 unreadable=null');
   });
 
   it('negative control: a run of light steps only (heavy steps left to CI) does not wait', () => {
@@ -434,6 +583,19 @@ describe('表 B: precheck waits once, before its first vitest / next build step 
     expect(waited.events.filter((e) => e !== 'heavy')).toEqual(plain.events);
     const [a, b] = [plain.record(), waited.record()];
     expect({ result: b.result, mutexSec: b.mutexSec, durationSec: b.durationSec }).toEqual({ result: a.result, mutexSec: a.mutexSec, durationSec: a.durationSec });
+  });
+
+  it('I4: a wait of 600 s adds 600 to durationSec only; mutexSec / runSec and the result stay (one wide step)', () => {
+    const opts = { changed: ['docs/x.md'], naming: manyTests, lockWaitMs: 30_000 };
+    const plain = precheckHarness(opts);
+    expect(precheckMain(plain.argv(), plain.deps)).toBe(0);
+    const waited = precheckHarness({ ...opts, waitMs: 600_000 });
+    expect(precheckMain(waited.argv(), waited.deps)).toBe(0);
+    expect(waited.events.filter((e) => e === 'heavy')).toHaveLength(1);
+    const [a, b] = [plain.record(), waited.record()];
+    expect(a.mutexSec).toBe(30);
+    expect(b.durationSec).toBe(a.durationSec + 600);
+    expect({ result: b.result, mutexSec: b.mutexSec, runSec: b.runSec }).toEqual({ result: a.result, mutexSec: a.mutexSec, runSec: a.runSec });
   });
 });
 
