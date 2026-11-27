@@ -360,6 +360,8 @@ const manyTests = Array.from({ length: HEAVY_TEST_FILES }, (_, i) => `tests/unit
 
 function precheckHarness({ changed = ['scripts/orchestrate/precheck.mjs'], naming = [] as string[], withWait = true } = {}) {
   const events: string[] = [];
+  // Each harness its own home and run dir: a second precheck at the same HEAD would otherwise find the first's record.
+  const own = fs.mkdtempSync(path.join(tmp, 'precheck-'));
   const deps = {
     run: (command: string, args: string[]) => {
       if (command === 'git') {
@@ -382,13 +384,13 @@ function precheckHarness({ changed = ['scripts/orchestrate/precheck.mjs'], namin
       events.push('lock');
       return { acquired: true, waitedMs: 0, heldBy: null, release: () => {} };
     },
-    home: tmp,
+    home: own,
     now: () => new Date(T0),
     log: () => {},
     error: (line: string) => events.push(`error ${line}`),
     ...(withWait ? { waitHeavy: () => events.push('heavy') } : {}),
   };
-  const runDir = path.join(tmp, 'runs', '2026-11-27');
+  const runDir = path.join(own, 'runs', '2026-11-27');
   const argv = (...extra: string[]) => ['--run-dir', runDir, '--issues', '4631', '--issue', '4631', '--worktree', path.join(tmp, 'wt'), ...extra];
   const record = () => readRecords(runDir, '4631').records.filter((r: { stage: string }) => r.stage === 'precheck').at(-1);
   return { deps, events, argv, record };

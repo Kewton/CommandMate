@@ -42,6 +42,7 @@ import { fileURLToPath } from 'node:url';
 import { appendRecord, gatePrecheck, inItem, readRecords } from './run-log.mjs';
 import { acquireMachineLockSync, describeOwner, lockPathOf, readHolder } from './machine-lock-sync.mjs';
 import { machineLockRoot, main as runPrecheckMain, optionsFromNote } from './precheck.mjs';
+import { heavyWaiter } from './heavy-runs.mjs';
 import {
   DEFAULT_CI_TIMEOUT_SEC,
   DEFAULT_POLL_SEC,
@@ -807,6 +808,7 @@ export function formatReport(report) {
  *   lockRoot?: string, mergeLockRoot?: string, pgid?: number, lockSleep?: (ms: number) => void,
  *   acquireTrainLock?: typeof acquireMachineLockSync, runPrecheck?: typeof runPrecheckMain,
  *   pid?: number, random?: () => string,
+ *   waitHeavy?: () => void,   before each train's precheck (#4631); only the entry gives the real one
  * }} [deps]
  * @returns {number} exit code
  */
@@ -991,6 +993,8 @@ function oneTrain(o, deps) {
       return finish('stopped', 1, `conflict markers in ${markers.join(', ')}`);
     }
     const args = precheckArgs({ runDir: o.runDir, issues: o.issues, worktree: trainDir, B0, candidates: kept });
+    // No other heavy run on the machine before the train's precheck starts its own (#4631).
+    deps.waitHeavy?.();
     const code = (deps.runPrecheck ?? runPrecheckMain)(args, { run, now, log, error, home });
     report.precheck = { args, exit: code };
     if (code !== 0) {
@@ -1149,7 +1153,7 @@ const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPat
 if (isMain) {
   if (process.env[INNER_ENV] === '1') {
     delete process.env[INNER_ENV];
-    process.exit(main(process.argv.slice(2), { pgid: process.pid }));
+    process.exit(main(process.argv.slice(2), { pgid: process.pid, waitHeavy: heavyWaiter({ label: 'merge-train' }) }));
   } else {
     runOuter(process.argv.slice(2)).then((code) => process.exit(code));
   }

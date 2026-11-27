@@ -75,6 +75,7 @@ import { dirtyPaths } from './dirty-tree.mjs';
 import { allocateLog, executionKey, workItemName } from './execution-key.mjs';
 import { diffManifest, manifestHash, takeManifest, verifyEnvState } from './env-manifest.mjs';
 import { LOCK_POLL_MS, acquireMachineLockSync as acquireTicketedLockSync } from './machine-lock-sync.mjs';
+import { heavyWaiter } from './heavy-runs.mjs';
 
 export const DEFAULT_BASE = 'origin/develop';
 /**
@@ -505,6 +506,15 @@ export function planSteps({ changed, deleted }, { base, kind, metrics = false, b
   return plan;
 }
 
+/**
+ * Whether a step's command starts what heavy-runs.mjs counts (#4631): vitest, or `npm run build` (next build).
+ *
+ * @param {[string, string[]]} command
+ */
+export function startsHeavyRun([cmd, args]) {
+  return args.includes('vitest') || (cmd === 'npm' && args[0] === 'run' && args[1] === 'build');
+}
+
 /** `name=status` pairs of a precheck / verify note. */
 export function parseNote(note) {
   /** @type {Record<string, string>} */
@@ -634,6 +644,7 @@ export function parseArgs(argv) {
  *   home?: string,
  *   log?: (line: string) => void,
  *   error?: (line: string) => void,
+ *   waitHeavy?: () => void,   before the first vitest / next build step runs (#4631); only the entry gives the real one
  * }} [deps]
  * @returns {number} exit code
  */
@@ -741,6 +752,8 @@ export function main(argv, deps = {}) {
     let runMs = 0;
     // Set once a heavy step waited out the budget: the steps after it do not wait again.
     let heldBy = null;
+    // Set once this precheck waited for the other heavy runs (#4631): only before its first vitest / next build.
+    let waitedHeavy = false;
     for (const step of steps) {
       const { command, reason, heavy } = plan[step];
       if (step === 'removed-tests') {
@@ -778,6 +791,12 @@ export function main(argv, deps = {}) {
         fs.appendFileSync(logFile, `\n## ${step}: not run — ${HEAVY_MUTEX} ${heldBy}\n`);
         log(`  ${step} ${HELD} (not run: ${HEAVY_MUTEX} ${heldBy})`);
         continue;
+      }
+      // No other heavy run on the machine before the first one this precheck starts (#4631). Not a
+      // lock and not counted in mutexSec / runSec: the record's split stays the lock's and the steps'.
+      if (!waitedHeavy && startsHeavyRun(command)) {
+        waitedHeavy = true;
+        deps.waitHeavy?.();
       }
       const lock = heavy ? acquireHeavyLock(HEAVY_LOCK_TIMEOUT_SEC * 1000) : null;
       let waitNote = '';
@@ -854,4 +873,4 @@ export function main(argv, deps = {}) {
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isMain) process.exit(main(process.argv.slice(2)));
+if (isMain) process.exit(main(process.argv.slice(2), { waitHeavy: heavyWaiter({ label: 'precheck', precheckPeers: false }) }));

@@ -93,6 +93,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { appendRecord, findLatest, gatePrecheck, inItem, latestByStage, readRecords, unmetStage } from './run-log.mjs';
 import { verifyEnvState } from './env-manifest.mjs';
+import { heavyWaiter } from './heavy-runs.mjs';
 import { itemProblem } from './execution-key.mjs';
 import { acquireMachineLockSync, describeOwner, lockPathOf, readHolder } from './machine-lock-sync.mjs';
 import {
@@ -395,6 +396,7 @@ function validateShared(options) {
  *   lockSleep?: (ms: number) => void,
  *   acquireMergeLock?: typeof acquireMachineLockSync,
  *   mergeOne?: (options: any, deps: any) => number,
+ *   waitHeavy?: () => void,   before the inner precheck (#4631); only the entry gives the real one
  * }} [deps]
  * @returns {number} exit code
  */
@@ -597,6 +599,8 @@ export function mergeOne(o, deps) {
         return 1;
       }
       phase('precheck');
+      // No other heavy run on the machine before the precheck starts its own (#4631).
+      deps.waitHeavy?.();
       const code = (deps.runPrecheck ?? runPrecheck)(
         [
           '--run-dir', o.runDir, '--issues', o.issues, '--issue', String(issue), '--worktree', o.worktree,
@@ -1186,7 +1190,7 @@ if (isMain) {
   if (process.env[INNER_ENV] === '1') {
     // Not inherited further: a merge-pr started by a child (a test) is an outer process of its own.
     delete process.env[INNER_ENV];
-    process.exit(main(process.argv.slice(2), { pgid: process.pid }));
+    process.exit(main(process.argv.slice(2), { pgid: process.pid, waitHeavy: heavyWaiter({ label: 'merge-pr' }) }));
   } else {
     runOuter(process.argv.slice(2)).then((code) => process.exit(code));
   }
