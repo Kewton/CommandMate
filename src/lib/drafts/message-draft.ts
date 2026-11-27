@@ -264,6 +264,14 @@ export function readRetargetStore(draftKey: string, env: RetargetEnv = {}): Reta
   } catch {
     return { kind: 'throws' };
   }
+  return parseRetargetStore(raw);
+}
+
+/**
+ * Issue #4604 accept r1c (F1): a raw `<draftKey>:retarget` value in the shapes {@link readRetargetStore}
+ * reads (a `StorageEvent`'s `newValue`: null is `absent`).
+ */
+export function parseRetargetStore(raw: string | null): RetargetStoreRead {
   if (raw === null) return { kind: 'absent' };
   let parsed: unknown;
   try {
