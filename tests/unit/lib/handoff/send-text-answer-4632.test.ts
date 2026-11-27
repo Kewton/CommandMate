@@ -12,7 +12,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { handoffApi } from '@/lib/handoff/screen-client';
+import { handoffApi, HANDOFF_SCREEN_TIMEOUT_MS } from '@/lib/handoff/screen-client';
 import { classifySendAnswer, type SendAnswerRow, type SendFact } from '@/lib/send-outcome/classify-send-answer';
 import {
   HandoffPageOperationRefusedError,
@@ -56,6 +56,8 @@ interface Q1Row {
   answer: Wire;
   cli: SendFact;
   cliRow: SendAnswerRow;
+  /** 追記 4: the 2xx body's read fails (immediately / at the deadline) — the CLI's U3. */
+  read?: 'throw' | 'stall';
 }
 
 const J = JSON_TYPE;
@@ -91,6 +93,9 @@ const ROWS: Q1Row[] = [
   { name: 'CT application/problem+json', answer: wire(201, 'application/problem+json', MSG), cli: 'sent', cliRow: 'S1' },
   { name: 'CT APPLICATION/JSON', answer: wire(201, 'APPLICATION/JSON', MSG), cli: 'sent', cliRow: 'S1' },
   { name: 'CT " application/json ;charset=utf-8"', answer: wire(201, ' application/json ;charset=utf-8', MSG), cli: 'sent', cliRow: 'S1' },
+  // 追記 4: the 2xx body's read fails — the CLI's U3 (unknown), never sent.
+  { name: '2xx body read throws', answer: wire(201, J, MSG), cli: 'unknown', cliRow: 'U3', read: 'throw' },
+  { name: '2xx body read stalls (the screen deadline)', answer: wire(201, J, MSG), cli: 'unknown', cliRow: 'U3', read: 'stall' },
 ];
 
 /** The hand-off send's result for one answer (the fetch is stubbed for it). */
@@ -103,6 +108,29 @@ async function sendTextFor(answer: Wire): Promise<unknown> {
   }
 }
 
+/** 追記 4: a 2xx whose body's read throws now, or stalls until the screen's deadline. */
+async function sendTextForRow(row: Q1Row): Promise<unknown> {
+  if (row.read === undefined) return sendTextFor(row.answer);
+  if (row.read === 'stall') vi.useFakeTimers();
+  vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: RequestInit) => new Response(new ReadableStream({
+    start(controller) {
+      if (row.read === 'throw') controller.error(new TypeError('terminated'));
+      else init?.signal?.addEventListener('abort', () => controller.error(new DOMException('aborted', 'AbortError')));
+    },
+  }), { status: row.answer.status, headers: { 'content-type': J } })));
+  try {
+    if (row.read === 'stall') {
+      const pending = handoffApi.sendText('wt-1', 'hello', { cliToolId: 'claude', instanceId: 'claude' });
+      await vi.advanceTimersByTimeAsync(HANDOFF_SCREEN_TIMEOUT_MS + 1000);
+      return await pending;
+    }
+    return await handoffApi.sendText('wt-1', 'hello', { cliToolId: 'claude', instanceId: 'claude' });
+  } finally {
+    if (row.read === 'stall') vi.useRealTimers();
+    vi.unstubAllGlobals();
+  }
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   resetHandoffRegistryForTests();
@@ -110,12 +138,17 @@ afterEach(() => {
 
 describe('[#4632 INV-H1] the hand-off text send reads each 2xx as the CLI does, by shape', () => {
   it.each(ROWS.map((row) => [row.name, row] as const))('%s', async (_name, row) => {
-    const cli = classifySendAnswer({
-      kind: 'response', status: row.answer.status, contentType: row.answer.contentType, bodyText: row.answer.body,
-    });
+    // 追記 4: a body-read failure is the CLI's `kind: 'error'` (U3), not a response row.
+    const cli = row.read === undefined
+      ? classifySendAnswer({
+        kind: 'response', status: row.answer.status, contentType: row.answer.contentType, bodyText: row.answer.body,
+      })
+      : classifySendAnswer({
+        kind: 'error', error: row.read === 'throw' ? new TypeError('terminated') : new Error('Request timed out'),
+      });
     expect({ fact: cli.fact, row: cli.row }).toEqual({ fact: row.cli, row: row.cliRow });
 
-    const result = await sendTextFor(row.answer);
+    const result = await sendTextForRow(row);
     if (cli.fact === 'sent' && (cli.row === 'S1' || cli.row === 'S2')) {
       expect(result).toEqual({ ok: true, status: row.answer.status, body: JSON.parse(row.answer.body) });
     } else {
@@ -123,8 +156,8 @@ describe('[#4632 INV-H1] the hand-off text send reads each 2xx as the CLI does, 
     }
   });
 
-  it('the table is whole: 29 rows', () => {
-    expect(ROWS).toHaveLength(29);
+  it('the table is whole: 31 rows (29 answers + the two body-read failures)', () => {
+    expect(ROWS).toHaveLength(31);
   });
 });
 
@@ -157,19 +190,6 @@ describe('[#4632 INV-H2] the non-2xx, the redirect, the transport failure and th
     }));
     const result = await handoffApi.sendText('wt-1', 'hello', { cliToolId: 'claude', instanceId: 'claude' });
     expect(result).toEqual({ ok: false, status: 0 });
-  });
-
-  it('a body cut after the headers is read as before: { ok: true, status: 201, body: {} }', async () => {
-    // A 2xx body that fails to read is a communication failure, not an answer; before #4632 `call`
-    // swallowed it into `{}` and read the 2xx as sent. The brief keeps that reading.
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(new ReadableStream({
-      start(controller) {
-        controller.enqueue(enc.encode('{"id":'));
-        controller.error(new TypeError('terminated'));
-      },
-    }), { status: 201, headers: { 'content-type': J } })));
-    const result = await handoffApi.sendText('wt-1', 'hello', { cliToolId: 'claude', instanceId: 'claude' });
-    expect(result).toEqual({ ok: true, status: 201, body: {} });
   });
 
   it('the gate’s refusal is the refused error, with nothing sent', async () => {

@@ -221,9 +221,10 @@ export const handoffApi = {
         try {
           bodyText = await response.text();
         } catch {
-          // A failure while the 2xx body is read (cut, stalled) is a communication failure, not an
-          // answer: before #4632 `call` swallowed it into `{}` and read the 2xx as sent. Unchanged.
-          return { ok: true, status: response.status, body: {} as unknown };
+          // Issue #4632 (追記 4): a failure while the 2xx body is read (cut, stalled) is the CLI's
+          // U3 — not sent, but not known either. The old `{ ok: true, body: {} }` read it as sent,
+          // which is the bug this Issue fixes. The status (the 2xx) is known and kept.
+          return { ok: false, status: response.status, outcome: 'unknown' };
         }
         const classified = classifySendAnswer({ kind: 'response', status: response.status, contentType, bodyText });
         if (classified.fact === 'sent' && (classified.row === 'S1' || classified.row === 'S2')) {
