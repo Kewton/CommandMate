@@ -18,7 +18,7 @@ function mockFetch(): ReturnType<typeof vi.fn> {
       redirected: false,
       url: 'http://localhost/api/worktrees/wt-1/send',
       headers: new Headers({ 'content-type': 'application/json' }),
-      json: () => Promise.resolve({ id: 'm', timestamp: '2026-09-01T10:20:30.000Z' }),
+      json: () => Promise.resolve({ id: 'm', role: 'user', timestamp: '2026-09-01T10:20:30.000Z' }),
     } as unknown as Response),
   );
   vi.stubGlobal('fetch', fetchMock);
