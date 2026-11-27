@@ -130,7 +130,10 @@ lock_acquire x ${s.budgetSec}; echo "rc=$?"`;
   const r = spawnSync('bash', ['-c', bashSection(body), 'bash', VERIFY_RUN], {
     encoding: 'utf8',
     timeout: 30000,
-    env: { ...process.env, CM_VERIFY_LOCK_ROOT: root, LK: lockPath, DEAD: String(deadPid()) },
+    // #4621: the dead holder's liveness is the seam's (ESRCH on exactly its pid, before any kill is sent), never a real
+    // kill -0: under a heavy run the pid of the exited `sh` can be reused by a live process, and D6 / the judgement then
+    // read the holder as alive (the stage before names nothing: `before` 0, or the cell's rc moves).
+    env: { ...process.env, CM_VERIFY_LOCK_ROOT: root, LK: lockPath, DEAD: String(deadPid()), CM_VERIFY_TEST_OBS_FAULT: `pid@@${deadPid()}=ESRCH` },
   });
   const [before, cell] = (r.stderr ?? '').split('--- cell');
   return { rc: (r.stdout ?? '').trim().split('\n').pop(), before: (before ?? '').split('\n'), lines: (cell ?? '').split('\n') };
@@ -196,7 +199,9 @@ function syncCell(acquisition: Acquisition, event: Event) {
   }
   if (acquisition === 'after-d6') {
     const p = syncFaults('prime');
-    const d6 = lockSync.recoverIfDead(lockPath, { timeoutMs: 0, warn: (l: string) => before.push(l), hooks: { fault: p.fault, onRecover: (stage: string) => (stage === 'recover-only-judged' ? p.pidAlive(deadPid()) : undefined) } });
+    // #4621: the holder's liveness is p.pidAlive (as every other stage), never a real kill -0 of deadPid(), which a
+    // heavy run may have reused for a live process (D6 then keeps the lock and names no unknown: `before` 0).
+    const d6 = lockSync.recoverIfDead(lockPath, { timeoutMs: 0, warn: (l: string) => before.push(l), hooks: { fault: p.fault, pidAlive: p.pidAlive, onRecover: (stage: string) => (stage === 'recover-only-judged' ? p.pidAlive(deadPid()) : undefined) } });
     // The sync JS's D6 names its re-read's unknown in its result (kept + unknown), not in a warn line.
     if (d6.unknown) before.push(`machine-lock-unknown point=${d6.unknown.point} path=${d6.unknown.path} errno=${d6.unknown.code}`);
   }
