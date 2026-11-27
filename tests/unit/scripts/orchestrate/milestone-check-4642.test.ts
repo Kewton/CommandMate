@@ -83,7 +83,6 @@ type ReadName = 'worktrees' | 'revParse' | 'revList' | 'milestones' | 'issueList
 
 interface World {
   root: string;
-  yaml: string;
   milestones: Ms[];
   issues: IssueRow[];
   worktrees: Wt[];
@@ -103,11 +102,13 @@ const DEFAULT_YAML = 'version: 1\nrepo: Owner/Thing\nbase: develop\nmilestone:\n
 
 const temps: string[] = [];
 let savedHome: string | undefined;
+let savedLockRoot: string | undefined;
 let home: string;
 let lockRoot: string;
 
 beforeEach(() => {
   savedHome = process.env.HOME;
+  savedLockRoot = process.env.CM_VERIFY_LOCK_ROOT;
   home = mkTemp('milestone-4642-home-');
   lockRoot = mkTemp('milestone-4642-lock-');
   process.env.HOME = home;
@@ -116,7 +117,8 @@ beforeEach(() => {
 afterEach(() => {
   if (savedHome === undefined) delete process.env.HOME;
   else process.env.HOME = savedHome;
-  delete process.env.CM_VERIFY_LOCK_ROOT;
+  if (savedLockRoot === undefined) delete process.env.CM_VERIFY_LOCK_ROOT;
+  else process.env.CM_VERIFY_LOCK_ROOT = savedLockRoot;
   for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
   cached = undefined;
 });
@@ -137,7 +139,8 @@ function repoWith(yaml: string | null): string {
 }
 
 const dirOf = (root: string) => path.dirname(root);
-const wtPath = (root: string, name: string) => path.join(dirOf(root), `wt-${name}`);
+/** A sibling worktree path whose basename is the real name, so the directory key is exercised too. */
+const wtPath = (root: string, name: string) => path.join(dirOf(root), name.replace(/\//g, '-'));
 
 function porcelain(w: World): string {
   const blocks = [`worktree ${w.root}\nHEAD ${'a'.repeat(40)}\nbranch refs/heads/${BASE}\n`];
@@ -236,7 +239,6 @@ function fakeSpawn(w: World, calls: Call[], hooks: { before?: (c: Call) => void 
 interface RunOptions {
   monoNow?: () => number;
   hooks?: { before?: (c: Call) => void };
-  planPath?: string;
   deadlineMono?: number;
 }
 
@@ -262,7 +264,6 @@ async function runCli(w: World, argv: string[], extra: RunOptions = {}) {
 function world(root: string, partial: Partial<World> = {}): World {
   return {
     root,
-    yaml: DEFAULT_YAML,
     milestones: [
       { title: 'Sprint 13', state: 'open', open: 0 },
       { title: 'Sprint 12', state: 'open', open: 0 },
@@ -314,20 +315,6 @@ interface Triple {
   issue: number | null;
 }
 
-const SEVERITY: Record<string, 'drift' | 'info'> = {
-  M1: 'drift',
-  M1b: 'info',
-  'M2-residue': 'drift',
-  'M2-planned': 'info',
-  'M2-no-evidence': 'info',
-  'M3-closing-forgotten': 'drift',
-  'M3-awaiting-accept': 'info',
-  'M4-previous-sprint': 'drift',
-  'M5-closed-leftover': 'drift',
-  'M5-empty-previous': 'info',
-  'M6-unrecorded-move': 'drift',
-};
-
 /**
  * The independent expectation of T1. It restates the rules of docs/design §2 and never calls
  * the implementation.
@@ -339,15 +326,23 @@ const SEVERITY: Record<string, 'drift' | 'info'> = {
 function expectedTriples(state: State, milestone: MilestoneAxis, evidence: Evidence): Triple[] {
   const observable: State = milestone === 'none' ? 'OPEN' : state;
   const rows: Triple[] = [];
-  const hasWork = evidence === 'unmerged' || evidence === 'fresh' || evidence === 'open-pr' || evidence === 'plan-item';
+  // Work already on disk (a branch with or without commits, an open PR) is "started"; a plan
+  // lane is an assignment, evidence for M1 and the 未着手/残留 split of M2 (design §2.2・§3.2).
+  const started = evidence === 'unmerged' || evidence === 'fresh' || evidence === 'open-pr';
+  const assigned = evidence === 'plan-item';
+  const hasWork = started || assigned;
   const mergedWorktree = evidence === 'merged-worktree';
   const isCurrent = milestone === 'current';
+  const planGiven = assigned;
   if (observable === 'OPEN') {
     if (!isCurrent) {
       if (hasWork) rows.push({ kind: 'M1', severity: 'drift', issue: 500 });
       else if (mergedWorktree) rows.push({ kind: 'M1b', severity: 'info', issue: 500 });
     }
-    if (isCurrent && !hasWork) rows.push({ kind: 'M2-no-evidence', severity: 'info', issue: 500 });
+    if (isCurrent && !started) {
+      if (!planGiven) rows.push({ kind: 'M2-no-evidence', severity: 'info', issue: 500 });
+      else rows.push({ kind: 'M2-planned', severity: 'info', issue: 500 });
+    }
     if (evidence === 'merged-pr-closes') rows.push({ kind: 'M3-closing-forgotten', severity: 'drift', issue: 500 });
     if (milestone === 'prev') rows.push({ kind: 'M4-previous-sprint', severity: 'drift', issue: 500 });
   }
@@ -375,9 +370,9 @@ function t1World(state: State, milestone: MilestoneAxis, evidence: Evidence): Wo
   const inClosed = milestone === 'closed';
   const title = inCurrent ? 'Sprint 13' : inPrev ? 'Sprint 12' : inLater ? 'Sprint 14' : inClosed ? 'Sprint 7' : null;
   const issues: IssueRow[] = [{ number: 500, state, title: 'five hundred', milestone: title }];
-  // Sprint 7 is always readable (open_issues >= 1) so the closed-milestone list is read.
-  const closedOpen = inClosed ? (state === 'OPEN' ? 2 : 1) : 0;
-  const closedIssues: IssueRow[] = inClosed ? issues : [{ number: 997, state: 'OPEN', title: 'stays open', milestone: 'Sprint 7' }];
+  // A closed Milestone with one open issue is read so M5 can be judged (design §3.5).
+  const closedIssues: IssueRow[] = inClosed ? [{ number: 997, state: 'OPEN', title: 'stays open', milestone: 'Sprint 7' }] : [];
+  const closedOpen = inClosed ? 1 : 0;
   const worktrees: Wt[] = [];
   const prs: PrRow[] = [];
   const revList: Record<string, number | 'fail' | 'timeout'> = {};
@@ -390,10 +385,11 @@ function t1World(state: State, milestone: MilestoneAxis, evidence: Evidence): Wo
     worktrees.push({ path: wtPath(root, 'commandmate-issue-500-a'), branch: target });
     revList[target] = 0;
   } else if (evidence === 'merged-worktree') {
+    // Matched by its head (the branch above), so the body names no Issue of its own.
     worktrees.push({ path: wtPath(root, 'commandmate-issue-500-a'), branch: target });
-    prs.push({ number: 900, head: target, state: 'merged', body: 'Refs #1' });
+    prs.push({ number: 900, head: target, state: 'merged', body: '' });
   } else if (evidence === 'open-pr') {
-    prs.push({ number: 901, head: target, state: 'open', body: 'Closes #1' });
+    prs.push({ number: 901, head: target, state: 'open', body: 'Closes #500' });
   } else if (evidence === 'plan-item') {
     plan = 'version: 1\nwaves: [{ id: "1", items: ["500-a1"] }]\nitems:\n  - { id: "500-a1", gates: [lint] }\n';
   } else if (evidence === 'merged-pr-closes') {
@@ -451,7 +447,7 @@ describe('T1 supplements: M2 planned / residue', () => {
     const file = path.join(w.root, 'plan.yaml');
     fs.writeFileSync(file, 'version: 1\nitems:\n  - { id: "500-a1", gates: [lint] }\n');
     const r = await runCli(w, ['check', '--json', '--plan', file, '--no-history']);
-    expect((r.json.rows as Triple[]).map((x) => x.kind)).toEqual(['M2-planned']);
+    expect((r.json.rows as Triple[]).filter((x) => x.issue === 500).map((x) => x.kind)).toEqual(['M2-planned']);
     expect(r.code).toBe(0);
   });
 
@@ -460,16 +456,17 @@ describe('T1 supplements: M2 planned / residue', () => {
     const file = path.join(w.root, 'plan.yaml');
     fs.writeFileSync(file, 'version: 1\nitems:\n  - { id: "777-a1", gates: [lint] }\n');
     const r = await runCli(w, ['check', '--json', '--plan', file, '--no-history']);
-    expect((r.json.rows as Triple[]).map((x) => x.kind)).toEqual(['M2-residue']);
+    expect((r.json.rows as Triple[]).filter((x) => x.issue === 500).map((x) => x.kind)).toEqual(['M2-residue']);
     expect(r.code).toBe(62);
   });
 
   it('M3 waiting for acceptance (label merged-awaiting-accept) is info, exit 0', async () => {
-    const w = t1World('OPEN', 'none', 'merged-pr-closes');
-    w.issues = [{ number: 500, state: 'OPEN', title: 'x', milestone: null, labels: ['merged-awaiting-accept'] }];
-    w.milestones = [{ title: 'Sprint 13', state: 'open', open: 0 }];
+    const w = t1World('OPEN', 'current', 'merged-pr-closes');
+    w.issues = [{ number: 500, state: 'OPEN', title: 'x', milestone: 'Sprint 13', labels: ['merged-awaiting-accept'] }];
     const r = await runCli(w, ['check', '--json', '--no-history']);
-    expect((r.json.rows as Triple[]).map((x) => [x.kind, x.severity])).toEqual([['M3-awaiting-accept', 'info']]);
+    const kinds = (r.json.rows as Triple[]).filter((x) => x.issue === 500).map((x) => [x.kind, x.severity]);
+    expect(kinds).toContainEqual(['M3-awaiting-accept', 'info']);
+    expect(kinds.some(([kind]) => kind === 'M3-closing-forgotten')).toBe(false);
     expect(r.code).toBe(0);
   });
 });
@@ -484,11 +481,13 @@ interface ReadDef {
   /** The substring the unknown[] entry must carry. */
   unknown: string;
   modes: Mode[];
+  /** The read only happens with history on (timeline / roadmap comment). */
+  history?: boolean;
   apply(w: World, mode: Mode): void;
 }
 
 const TIMEOUT: Answer = { status: null, error: { code: 'ETIMEDOUT' } };
-const manyMilestones = (n: number): Ms[] => Array.from({ length: n }, (_, i) => ({ title: `M${i}`, state: 'open' as const, open: 0 }));
+const manyMilestones = (n: number): Ms[] => Array.from({ length: n }, (_, i) => ({ title: i === 0 ? 'Sprint 13' : `M${i}`, state: 'open' as const, open: 0 }));
 const manyIssues = (n: number): IssueRow[] => Array.from({ length: n }, (_, i) => ({ number: 9000 + i, state: 'OPEN' as const, title: 'x', milestone: 'Sprint 13' }));
 const manyPrs = (n: number, state: 'open' | 'merged'): PrRow[] => Array.from({ length: n }, (_, i) => ({ number: 9000 + i, head: `feature/${i}-x`, state }));
 
@@ -557,11 +556,12 @@ const READS: ReadDef[] = [
     name: 'gh api timeline',
     unknown: 'gh api timeline #11',
     modes: ['fail', 'timeout', 'unparsable'],
+    history: true,
     apply: (w, mode) => {
       w.issues = [{ number: 11, state: 'OPEN', title: 'wip', milestone: 'Sprint 13' }];
       w.roadmapComments = ['2026-11-26T00:00:00Z'];
       if (mode === 'unparsable') w.override = { [`gh api --paginate repos/${REPO}/issues/11/timeline?per_page=100`]: { status: 0, stdout: '{bad' } };
-      else w.timeline = { 11: mode === 'fail' ? 'fail' : ({} as never) };
+      else w.timeline = { 11: mode === 'fail' ? 'fail' : [] };
       if (mode === 'timeout') w.override = { [`gh api --paginate repos/${REPO}/issues/11/timeline?per_page=100`]: TIMEOUT };
     },
   },
@@ -569,6 +569,7 @@ const READS: ReadDef[] = [
     name: 'gh issue view roadmap comments',
     unknown: 'gh issue view roadmap comments',
     modes: ['fail', 'timeout', 'unparsable'],
+    history: true,
     apply: (w, mode) => {
       w.issues = [{ number: 11, state: 'OPEN', title: 'wip', milestone: 'Sprint 13' }];
       if (mode === 'unparsable') w.override = { [`gh issue view 4461 --repo ${REPO} --json comments`]: { status: 0, stdout: '{"comments":' } };
@@ -594,7 +595,7 @@ describe('T2 each read, each failure mode: judge nothing (exit 61, complete fals
   it.each(cases)('%s', async (_name, read, mode) => {
     const w = worldWith(DEFAULT_YAML, { issues: [], roadmapComments: [] });
     read.apply(w, mode);
-    const r = await runCli(w, ['check', '--json']);
+    const r = await runCli(w, read.history ? ['check', '--json'] : ['check', '--json', '--no-history']);
     expect(r.code).toBe(61);
     expect(r.json.complete).toBe(false);
     expect(r.json.unknown.some((u: string) => u.includes(read.unknown))).toBe(true);
@@ -704,16 +705,16 @@ describe('T4 the keys', () => {
   });
 
   it('puts keyless worktrees and open PRs in `keyless`, never in a silent drop', async () => {
-    const w = worldWith(DEFAULT_YAML, {
+    const root = repoWith(DEFAULT_YAML);
+    const w = world(root, {
       issues: [{ number: 11, state: 'OPEN', title: 'wip', milestone: 'Sprint 13' }],
       worktrees: [
-        { path: wtPath('ROOT', 'commandmate-accept-s12t-j'), branch: null },
-        { path: wtPath('ROOT', 'docs-s13'), branch: 'docs/s13-retro-measures' },
+        { path: wtPath(root, 'commandmate-accept-s12t-j'), branch: null },
+        { path: wtPath(root, 'docs-s13'), branch: 'docs/s13-retro-measures' },
       ],
       prs: [{ number: 777, head: 'hotfix', state: 'open', title: 'no number', body: '' }],
       roadmapComments: [],
     });
-    w.worktrees = w.worktrees.map((x) => ({ ...x, path: x.path.replace('ROOT', w.root) }));
     const r = await runCli(w, ['check', '--json', '--no-history']);
     const keyless = r.json.keyless as Array<{ path: string | null; branch: string | null; pr: number | null }>;
     expect(keyless).toHaveLength(3);
@@ -723,22 +724,16 @@ describe('T4 the keys', () => {
   });
 
   it('does not report the primary checkout or excluded branches', async () => {
-    const w = worldWith(DEFAULT_YAML, {
+    const root = repoWith(`${DEFAULT_YAML}exclude: [agent-health-runner]\n`);
+    const w = world(root, {
       issues: [{ number: 11, state: 'OPEN', title: 'wip', milestone: 'Sprint 13' }],
       worktrees: [
-        { path: 'PRIMARY', branch: null },
-        { path: 'WT-develop', branch: 'develop' },
-        { path: 'WT-ah', branch: 'agent-health-runner' },
+        { path: root, branch: null },
+        { path: wtPath(root, 'develop'), branch: 'develop' },
+        { path: wtPath(root, 'ah'), branch: 'agent-health-runner' },
       ],
       roadmapComments: [],
     });
-    w.worktrees = [
-      { path: w.root, branch: null },
-      { path: wtPath(w.root, 'develop'), branch: 'develop' },
-      { path: wtPath(w.root, 'ah'), branch: 'agent-health-runner' },
-    ];
-    w.yaml = `${DEFAULT_YAML}exclude: [agent-health-runner]\n`;
-    fs.writeFileSync(path.join(w.root, '.commandmate', 'flow.yaml'), w.yaml);
     const r = await runCli(w, ['check', '--json', '--no-history']);
     expect(r.json.keyless).toEqual([]);
     expect((r.json.rows as Triple[]).map((x) => x.issue)).not.toContain(0);
@@ -809,6 +804,7 @@ function t6World(): World {
     milestones: [
       { title: 'Sprint 13', state: 'open', open: 2 },
       { title: 'Sprint 12', state: 'open', open: 0 },
+      { title: 'Sprint 14', state: 'open', open: 1 },
     ],
     issues: [
       { number: 10, state: 'CLOSED', title: 'Finished', milestone: 'Sprint 13' },
@@ -910,7 +906,7 @@ function t7World(current = 'Sprint 13'): World {
     // #4546: unmerged, in Sprint 12
     { path: wtPath(root, 'commandmate-issue-4546-pr3'), branch: 'feature/4546-pr3' },
     // the current lanes
-    { path: wtPath(root, 'commandmate-issue-4621'), branch: 'fix/4621-4636-lock' },
+    { path: wtPath(root, 'commandmate-issue-4621'), branch: 'fix/4621-single' },
     { path: wtPath(root, 'commandmate-issue-4631'), branch: 'fix/4631-x' },
     { path: wtPath(root, 'commandmate-issue-4632'), branch: 'fix/4632-x' },
     { path: wtPath(root, 'commandmate-issue-4640'), branch: 'fix/4640-x' },
@@ -985,7 +981,7 @@ describe('T7 today’s drift (Sprint 12/13 fixture)', () => {
     expect(m6).toBeDefined();
     expect(m6?.issue).toBe(4604);
     expect(m6?.detail).toContain('milestoned');
-    expect(after.code).toBe(61 === after.code ? 61 : 62);
+    expect(after.code).toBe(62);
   });
 
   it('--no-history reads no timeline and no roadmap comment', async () => {
@@ -1000,14 +996,16 @@ describe('T7 today’s drift (Sprint 12/13 fixture)', () => {
 // ---------------------------------------------------------------------------
 
 describe('T8 the deadline', () => {
-  it('a result that comes back at or after the deadline is not used (61)', async () => {
+  it('a read that cannot finish within the deadline is a timeout, and the run is 61 (not 0/62)', async () => {
     let now = 0;
     const w = t7World();
+    // The clock passes the deadline while the worktree read runs: every later gh call is
+    // refused a budget, and the milestones read cannot be judged.
     const r = await runCli(w, ['check', '--json'], {
       monoNow: () => now,
       hooks: {
         before: (c) => {
-          if (c.args.join(' ') === 'worktree list --porcelain') now = 120_001;
+          if (c.cmd === 'gh') now = 120_001;
         },
       },
     });
