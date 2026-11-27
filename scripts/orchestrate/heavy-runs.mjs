@@ -13,9 +13,11 @@
  * and only bash with `verify-run.sh` is a run), `wait-verify.mjs` (it waits for a reply; nothing heavy),
  * the queue table's text (this script never reads it), and this process and every ancestor of it
  * (a `node precheck.mjs` does not wait for itself, nor merge-pr's inner process for its outer one).
- * A precheck's own wait also leaves out the other `precheck.mjs` processes themselves and counts only
- * their vitest / next build children (`precheckPeers: false`): two prechecks waiting before their first
- * vitest would otherwise wait for each other for ever.
+ * A precheck's own wait (before each of its vitest / next build steps) also leaves out the other
+ * `precheck.mjs` processes themselves and counts only their vitest / next build children
+ * (`precheckPeers: false`): two prechecks waiting between their steps would otherwise wait for each other
+ * for ever. Waiting before every heavy step, not only the first, closes the gap a step change leaves (one
+ * precheck between two steps runs nothing counted, and the other's vitest could start there).
  *
  * The wait is not a lock (I3): two waiters that both read zero both start, as with v4. The machine
  * lock `cpu.heavy` (resource-sem, precheck's heavy steps) is unchanged.
@@ -73,8 +75,8 @@ function commName(comm) {
 /**
  * Whether a row is a heavy run by itself (I1), before the own process and its ancestors are left out.
  * `precheckPeers: false` (a precheck's own wait): a `node … precheck.mjs` row counts only through what it
- * runs (its vitest / next build child). Two prechecks waiting before their first vitest would otherwise
- * each count the other's process and wait for ever; this way both read zero and start, the window of I3.
+ * runs (its vitest / next build child). Two prechecks waiting before a heavy step would otherwise each
+ * count the other's process and wait for ever; this way both read zero and start, the window of I3.
  *
  * @param {{ comm: string, args: string }} row
  * @param {{ precheckPeers?: boolean }} [options]

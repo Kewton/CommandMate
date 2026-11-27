@@ -23,10 +23,11 @@ verify の待ちは 1 本あたり 30〜45 分を見込みに入れる（#4467 �
 
 S12 の手当て 4（人の承認 2026-11-27）。ゲートの中身・合格の条件は変えない（いつ流すかの決まり）。
 
-- 往復の途中（レビューの指摘の直し・再指示）は、リーダーの再現（関わる試験と変異を、待ちの 1 行の後に 1 ファイルずつ）だけで進める。途中のワーカーの返しは返しの行で受け、`wait --verify`・`wait-verify.mjs`・precheck を流さない
+- 往復の途中（レビューの指摘の直し・再指示）は、リーダーの再現（関わる試験と変異を、`heavy-runs.mjs wait` の後に 1 ファイルずつ）だけで進める。途中のワーカーの返しは返しの行で受け、`wait --verify`・`wait-verify.mjs`・precheck を流さない
 - 正式な verify と precheck は、レビューの処分が閉じた後の HEAD で 1 回。裁定はこの run で行う（リーダーの再現・直の実行を裁定に使わない）
 - 重い走りを内側で始める道具（`wait-verify.mjs`・`precheck.mjs`・`merge-pr.mjs`・`merge-train.mjs`）は、始める前に `scripts/orchestrate/heavy-runs.mjs` で自分で待つ（#4631）
 - 手で重い走り（直の vitest・build）を始めるときは、頭に `node scripts/orchestrate/heavy-runs.mjs wait &&` を付け、順番表に始めた時刻で 1 行書く
+- #4631 より前の HEAD の作業木（レビュー・赤の確かめの detach 作業木）では、`heavy-runs.mjs` を develop の checkout のパスから呼ぶ（`node <develop の checkout>/scripts/orchestrate/heavy-runs.mjs wait &&`）
 
 ## PM の保留の指示
 

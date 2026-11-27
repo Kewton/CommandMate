@@ -644,7 +644,7 @@ export function parseArgs(argv) {
  *   home?: string,
  *   log?: (line: string) => void,
  *   error?: (line: string) => void,
- *   waitHeavy?: () => void,   before the first vitest / next build step runs (#4631); only the entry gives the real one
+ *   waitHeavy?: () => void,   before each vitest / next build step runs (#4631); only the entry gives the real one
  * }} [deps]
  * @returns {number} exit code
  */
@@ -752,8 +752,6 @@ export function main(argv, deps = {}) {
     let runMs = 0;
     // Set once a heavy step waited out the budget: the steps after it do not wait again.
     let heldBy = null;
-    // Set once this precheck waited for the other heavy runs (#4631): only before its first vitest / next build.
-    let waitedHeavy = false;
     for (const step of steps) {
       const { command, reason, heavy } = plan[step];
       if (step === 'removed-tests') {
@@ -792,12 +790,11 @@ export function main(argv, deps = {}) {
         log(`  ${step} ${HELD} (not run: ${HEAVY_MUTEX} ${heldBy})`);
         continue;
       }
-      // No other heavy run on the machine before the first one this precheck starts (#4631). Not a
-      // lock and not counted in mutexSec / runSec: the record's split stays the lock's and the steps'.
-      if (!waitedHeavy && startsHeavyRun(command)) {
-        waitedHeavy = true;
-        deps.waitHeavy?.();
-      }
+      // No other heavy run on the machine before each one this precheck starts (#4631): before every
+      // vitest / next build step, not only the first — between two steps this precheck runs nothing
+      // counted, and another precheck's vitest that started in that gap is waited for here. Not a lock
+      // and not counted in mutexSec / runSec (only in durationSec): the split stays the lock's and the steps'.
+      if (startsHeavyRun(command)) deps.waitHeavy?.();
       const lock = heavy ? acquireHeavyLock(HEAVY_LOCK_TIMEOUT_SEC * 1000) : null;
       let waitNote = '';
       if (lock) {
