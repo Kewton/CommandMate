@@ -78,7 +78,6 @@ import {
   dropHandoffUnit,
   endHandoffCancel,
   endHandoffStop,
-  currentHandoffHold,
   handoffStoreSnapshot,
   handoffTextSendable,
   handoffUnitsLock,
@@ -216,11 +215,12 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
   const textSending = opening?.textSending ?? false;
   const writing = opening?.writing ?? false;
   /**
-   * Issue #4632: the request's text got a 2xx that does not say whether it arrived. Read through the
-   * store's hold (`currentHandoffHold`), written through `patchHandoffOpening` (`sendText`), so only
-   * close-rule holds the flag; the person still decides where it is kept.
+   * Issue #4632 (review s13 P3-4): the request's text got a 2xx that does not say whether it arrived.
+   * Read from this opening (the store's snapshot), not the module's state while rendering; written
+   * through `patchHandoffOpening` (`sendText`), so only close-rule holds it — the page's memory keyed
+   * by the request id, never browser storage (a reload loses it: the known limit).
    */
-  const textOutcomeUnknown = currentHandoffHold().textOutcomeUnknown;
+  const textOutcomeUnknown = opening?.textOutcomeUnknown ?? false;
   /**
    * Issue #4317 PR2: the host beside the shell keeps this instance (and its DOM) over route and
    * width changes, so what is local here — the notice — is per opening: set afresh when
@@ -300,9 +300,12 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
   /**
    * ②: send the request's text to the agent, for the opening `of` (its worktree and target).
    * Not once the opening closed or a cancel started (pr2e, PM P3-2): checked before the text goes.
+   * Issue #4632 (review s13 P3-3): `confirmed` — the press went through the unknown's confirmation
+   * row. Only a send that actually left clears the "unknown" mark; a gate refusal (`refused`) and an
+   * early return (no send at all) leave it, so the next press asks again.
    */
   const sendText = useCallback(
-    async (of: HandoffOpening, requestIdToSend: string, body: string) => {
+    async (of: HandoffOpening, requestIdToSend: string, body: string, confirmed = false) => {
       if (!handoffTextSendable(of.token)) return;
       // Issue #4345 1b 再指示 1: held by the opening until the send is recorded (a remount meanwhile
       // offers no "send again" and `handoffTextSendable` refuses a second send).
@@ -316,7 +319,7 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
           operation ?? registration
         );
         // Issue #4345 1c 再指示 2: not sent (the gate refused it) — nothing happened: no record of a
-        // failure, no notice; the request stays `unsent` for "send again".
+        // failure, no notice; the request stays `unsent` for "send again". The unknown's mark stays too.
         if (sent.refused) return;
         // Issue #4345 1b: what the send said is recorded for this opening whatever the session's state
         // now (an expiry taken meanwhile, this send's own 401 included) — a record, not a new send.
@@ -330,8 +333,11 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
           ? await handoffApi.sent(of.worktreeId, requestIdToSend, recordOwner)
           : await handoffApi.sendFailed(of.worktreeId, requestIdToSend, recordOwner);
         if (marked.ok && marked.body?.request) patchHandoffOpening(of.token, { view: marked.body });
+        // Issue #4632: the mark is cleared once the send came back `sent` (S1 / S2), or once a
+        // confirmed send actually left (this point is past the gate).
         if (sent.ok) patchHandoffOpening(of.token, { textOutcomeUnknown: false });
         else if (outcomeUnknown) patchHandoffOpening(of.token, { textOutcomeUnknown: true });
+        else if (confirmed) patchHandoffOpening(of.token, { textOutcomeUnknown: false });
         if (isLiveHandoffOpening(of.token)) {
           setNotice(
             sent.ok
@@ -625,9 +631,17 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
     [closeBy, forWorktree, registered, registration, reload, t, token, view]
   );
 
-  const resendText = useCallback(() => {
-    if (opening && view && text && registered()) void sendText(opening, view.request.id, text);
-  }, [opening, registered, sendText, text, view]);
+  /**
+   * Issue #4632: `confirmed` — the press came from the unknown send's confirmation row. The mark is
+   * cleared inside `sendText`, once the send actually left (review s13 P3-3): a gate refusal or an
+   * early return sends nothing and keeps it.
+   */
+  const resendText = useCallback(
+    (confirmed = false) => {
+      if (opening && view && text && registered()) void sendText(opening, view.request.id, text, confirmed);
+    },
+    [opening, registered, sendText, text, view]
+  );
 
   /** The opening is over, or a cancel of its worktree started: what was started goes no further. */
   const stopped = useCallback((): boolean => !isLiveHandoffOpening(token) || handoffUnitsOf(forWorktree).cancelling, [forWorktree, token]);
@@ -866,8 +880,7 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
                     size="sm"
                     onClick={() => {
                       setConfirmResend(false);
-                      if (token) patchHandoffOpening(token, { textOutcomeUnknown: false });
-                      resendText();
+                      resendText(true);
                     }}
                     disabled={busy || cancelling || text === null || !actionable}
                     data-testid="handoff-resend-unknown-yes"

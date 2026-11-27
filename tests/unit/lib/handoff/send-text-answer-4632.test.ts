@@ -5,8 +5,9 @@
  *   through `handoffApi.sendText`, compared by shape: a sent row is `{ ok: true, status, body }`
  *   (S1 / S2 only), every other 2xx is `{ ok: false, status, outcome: 'unknown' }`. The row count is
  *   fixed so a thinned table is red.
- * - INV-H2: the non-2xx, the `/login` redirect, a transport failure (including a body cut after the
- *   headers) and the gate's refusal are exactly what they were before this change (literal shapes).
+ * - INV-H2: the non-2xx, the `/login` redirect, a transport failure and the gate's refusal are
+ *   exactly what they were before this change (literal shapes, the refusal by its own shape too). A
+ *   2xx whose body is cut or stalled is INV-H1's (追記 4: the CLI's U3, `outcome: 'unknown'`).
  *
  * @vitest-environment node
  */
@@ -198,8 +199,8 @@ describe('[#4632 INV-H2] the non-2xx, the redirect, the transport failure and th
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const result = await handoffApi.sendText('wt-1', 'hello', { cliToolId: 'claude', instanceId: 'claude' }, owner);
-    expect(result.ok).toBe(false);
-    expect((result as { refused?: unknown }).refused).toBeInstanceOf(HandoffPageOperationRefusedError);
+    // Review s13 P3-5-3: compared by its shape, not one bit of it.
+    expect(result).toEqual({ ok: false, refused: expect.any(HandoffPageOperationRefusedError) });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

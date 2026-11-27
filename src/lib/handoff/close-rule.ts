@@ -64,10 +64,10 @@ export interface HandoffHold {
   /** The request's cancel has been sent and not answered. */
   cancelling?: boolean;
   /**
-   * Issue #4632: the request's text got a 2xx that says nothing about whether it arrived. Read here
-   * (`currentHandoffHold`) and written by `patchHandoffOpening`, so the flag lives only in this
-   * store; where it is kept (the page's memory, or per request id in browser storage) is still the
-   * person's decision (the store's shape can change without the dialog).
+   * Issue #4632: the current opening's request got a 2xx that says nothing about whether its text
+   * arrived. The page's memory only, keyed by the request id (a second opening of the same request
+   * keeps the flag; a reload of the page loses it — the known limit, no browser storage). Read here
+   * (`currentHandoffHold`) and written by `patchHandoffOpening`.
    */
   textOutcomeUnknown?: boolean;
 }
@@ -188,10 +188,10 @@ export interface HandoffOpening {
   /** Issue #4345 1b 再指示 1: an extend or a rebase of this opening is answered (the same reason). */
   readonly writing: boolean;
   /**
-   * Issue #4632: the request's text got a 2xx that does not say whether it arrived (the CLI's table
-   * read `unknown`). Kept on the opening (a remount keeps it); read through `currentHandoffHold`
-   * and written through `patchHandoffOpening` only. Where it is stored, and for how long, is the
-   * person's decision (the page's memory today; per request id later would change this store only).
+   * Issue #4632 (review s13 P2-1): this opening's request's "the text's 2xx did not say whether it
+   * arrived" mark, mirrored from the store's per-request memory ({@link HandoffStoreState.textOutcomeUnknown})
+   * whenever the opening is patched. The dialog reads it here; it does not decide where the mark is
+   * kept. A new opening of the same request picks the mark up (a 409 `request_open`).
    */
   readonly textOutcomeUnknown: boolean;
 }
@@ -223,11 +223,18 @@ export interface HandoffStoreState {
   readonly opening: HandoffOpening | null;
   /** G-PR3: the items panel's units, keyed by worktree id. */
   readonly items: Readonly<Record<string, MemItemsUnits>>;
+  /**
+   * Issue #4632 (review s13 P2-1): the requests whose text got a 2xx that does not say whether it
+   * arrived, by request id. The page's memory only: a new opening of the same request keeps it (a
+   * 409 `request_open` picked up), a reload of the page loses it (the known limit), and browser
+   * storage is never written. Written by {@link patchHandoffOpening} through the opening it names.
+   */
+  readonly textOutcomeUnknown: Readonly<Record<string, true>>;
 }
 
 const NO_UNITS: HandoffUnits = { inflight: null, pending: null, stopping: false, cancelling: false };
 const NO_ITEM_UNITS: MemItemsUnits = { sending: null, unknown: {} };
-const EMPTY: HandoffStoreState = { units: {}, opening: null, items: {} };
+const EMPTY: HandoffStoreState = { units: {}, opening: null, items: {}, textOutcomeUnknown: {} };
 let state: HandoffStoreState = EMPTY;
 const listeners = new Set<() => void>();
 
@@ -343,13 +350,35 @@ export function liveHandoffOpeningFor(instanceId: string): HandoffOpening | null
   return current && !current.closed && current.target.instanceId === instanceId ? current : null;
 }
 
-/** Writes what the opening `token` learnt (nothing once another opening started). */
+/**
+ * Writes what the opening `token` learnt (nothing once another opening started). Issue #4632
+ * (review s13 P2-1): `textOutcomeUnknown` is the page's memory keyed by the request id — the
+ * opening's field mirrors the request's entry, read afresh whenever a view is patched (a 409
+ * `request_open` picked up keeps the flag of its request). No browser storage is written.
+ */
 export function patchHandoffOpening(
   token: HandoffOpeningToken,
   patch: Partial<Pick<HandoffOpening, 'created' | 'view' | 'text' | 'plainOnly' | 'plainStopped' | 'choices' | 'textSending' | 'writing' | 'textOutcomeUnknown'>>
 ): void {
-  if (state.opening?.token !== token) return;
-  commit({ ...state, opening: { ...state.opening, ...patch } });
+  const current = state.opening;
+  if (current?.token !== token) return;
+  const next: HandoffOpening = { ...current, ...patch };
+  const requestId = next.view?.request.id ?? null;
+  if ('textOutcomeUnknown' in patch && patch.textOutcomeUnknown !== undefined) {
+    const marks = { ...state.textOutcomeUnknown };
+    if (requestId === null) {
+      // Nothing to key it by (no request read yet): the opening's own value only.
+      commit({ ...state, opening: next });
+      return;
+    }
+    if (patch.textOutcomeUnknown) marks[requestId] = true;
+    else delete marks[requestId];
+    commit({ ...state, opening: { ...next, textOutcomeUnknown: patch.textOutcomeUnknown }, textOutcomeUnknown: marks });
+    return;
+  }
+  // Any other patch (a view read above all) mirrors its request's entry onto the opening.
+  const mirrored = requestId === null ? current.textOutcomeUnknown : state.textOutcomeUnknown[requestId] === true;
+  commit({ ...state, opening: { ...next, textOutcomeUnknown: mirrored } });
 }
 
 /** The opening `token` is the dialog's and has not been closed. */
