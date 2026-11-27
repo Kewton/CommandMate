@@ -14,6 +14,13 @@
  * paths on stderr) when a baseline path that is still in the repository would
  * disappear, and writes such a drop only with `--allow-drop`.
  *
+ * The review's rest (review-4640.md, claude-8):
+ *   P2-1 `main` passing the options to the split is itself under test: the
+ *        function tests (R1, R2) stayed green with the wiring removed.
+ *   P3-1 a current baseline that reads neither ok nor missing (corrupt) counted
+ *        no dropped path, so a partial worktree overwrote it anyway.
+ *   P3-2 `--source --allow-drop` took `--allow-drop` as the source text.
+ *
  * Invariants:
  *   I1 own > peer > baseline > median: an own or a peer record keeps the
  *      median default (NO_RECORD_DEFAULT_MS is not used then)
@@ -125,6 +132,30 @@ function writeBaseline(root: string, durations: Record<string, number>): void {
 
 function writeStore(root: string, durations: Record<string, number>): void {
   writeFileAt(root, STORE_REL, JSON.stringify({ version: 1, vitestCache: null, durations }));
+}
+
+/** The files of a group's `vitest run` command line. */
+function groupFiles(args: string[]): string[] {
+  const out: string[] = [];
+  for (const a of args.slice(1)) {
+    if (a.startsWith('--')) break;
+    out.push(a);
+  }
+  return out;
+}
+
+/** The json report vitest would write for `files`. */
+function writeReport(args: string[], root: string, files: string[]): void {
+  let t = 1_700_000_000_000;
+  const testResults = files.map((file) => {
+    const startTime = t;
+    const endTime = t + 1000;
+    t = endTime + 1;
+    return { name: path.join(root, file), status: 'passed', message: '', startTime, endTime, assertionResults: [] };
+  });
+  const flag = args.find((a) => a.startsWith('--outputFile.json='));
+  if (!flag) throw new Error('no --outputFile.json= in the group arguments');
+  fs.writeFileSync(flag.slice('--outputFile.json='.length), JSON.stringify({ testResults }));
 }
 
 /** The write-baseline path must not collect, must not load vitest, must not run a group. */
@@ -333,6 +364,7 @@ describe('R5 (P3-3): the shapes --write-baseline accepts and rejects', () => {
     ['--allow-drop with no --source and a stray word', ['--write-baseline', '--allow-drop', 'x']],
     ['--source with no value, --allow-drop present', ['--write-baseline', '--allow-drop', '--source']],
     ['an unknown flag beside --source', ['--write-baseline', '--source', 'x', '--bogus']],
+    ['a --source value that begins with --', ['--write-baseline', '--source', '--allow-drop']],
   ])('%s: exit 2 and nothing written', async (_label, argv) => {
     const root = tempRoot('cm-4640-r5b-');
     writeStore(root, { [FILE_A]: 9000 });
@@ -340,5 +372,78 @@ describe('R5 (P3-3): the shapes --write-baseline accepts and rejects', () => {
     const code = await api.main(argv, { root, log: () => undefined, ...noRun });
     expect(code).toBe(2);
     expect(fs.existsSync(path.join(root, BASELINE_REL))).toBe(false);
+  });
+});
+
+describe('R6 (P2-1): main itself passes the no-record default to the split', () => {
+  it('a root that has only the baseline: the 4th argument is { defaultWeight: 300 } and the log says 300ms', async () => {
+    const root = tempRoot('cm-4640-r6-');
+    const files = ['tests/unit/a.test.ts', 'tests/unit/b.test.ts'];
+    writeBaseline(root, { [files[0]]: 6000 });
+    writeFileAt(root, files[0], '');
+    writeFileAt(root, files[1], '');
+    const logs: string[] = [];
+    const splitCalls: { maxGroups?: number; options?: unknown }[] = [];
+    // The existing injection point: record what main hands the split, then split for real.
+    const split = (
+      f: string[],
+      d: Durations,
+      maxGroups?: number,
+      options?: { defaultWeight?: number }
+    ): Plan => {
+      splitCalls.push({ maxGroups, options });
+      return api.splitLpt(f, d, maxGroups, options);
+    };
+
+    const code = await api.main(['--base', 'origin/develop'], {
+      root,
+      log: (msg: string) => logs.push(msg),
+      out: () => undefined,
+      baseEnv: { CI: 'true', PATH: process.env.PATH },
+      tmpBase: path.join(root, 'g'),
+      collectChangedFiles: () => ({ mergeBase: 'mb4640', files: ['src/x.ts'] }),
+      findTextScanTests: () => [],
+      collectSet: async () => files,
+      readPeers: () => ({ status: 'ok', count: 0, peers: [] }),
+      split,
+      runGroup: async ({ args, logPath }: { args: string[]; logPath: string }) => {
+        fs.writeFileSync(logPath, '');
+        writeReport(args, root, groupFiles(args));
+        return { code: 0, signal: null };
+      },
+    });
+
+    expect(code).toBe(0);
+    expect(splitCalls).toHaveLength(1);
+    // Removing the 4th argument from main()'s call turns this red (see the mutation).
+    expect(splitCalls[0].options).toEqual({ defaultWeight: 300 });
+    expect(logs).toContain(
+      'run-related-unit-tests: split=lpt groups=2 cache=missing known=1/2 default-weight=300ms'
+    );
+  });
+});
+
+describe('R7 (P3-1): a current baseline that reads neither ok nor missing', () => {
+  it('corrupt: exit 1 without --allow-drop (the file kept, one reason line); written with it', async () => {
+    const root = tempRoot('cm-4640-r7-');
+    writeFileAt(root, BASELINE_REL, 'not json');
+    writeStore(root, { [FILE_A]: 9000 });
+    writeFileAt(root, FILE_A, '');
+
+    const code = await api.main(['--write-baseline', '--source', 'x'], { root, log: () => undefined, ...noRun });
+
+    expect(code).toBe(1);
+    expect(fs.readFileSync(path.join(root, BASELINE_REL), 'utf-8')).toBe('not json');
+    expect(stderr).toHaveLength(1);
+    expect(stderr[0]).toMatch(/corrupt/);
+    expect(stderr[0]).toContain(BASELINE_REL);
+
+    const allowed = await api.main(
+      ['--write-baseline', '--source', 'x', '--allow-drop'],
+      { root, log: () => undefined, ...noRun }
+    );
+
+    expect(allowed).toBe(0);
+    expect([...api.readBaselineDurations({ root }).durations.entries()]).toEqual([[FILE_A, 9000]]);
   });
 });

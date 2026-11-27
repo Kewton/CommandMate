@@ -809,9 +809,14 @@ function defaultTmpBase() {
  * writes such a drop; a path whose file has left the repository is dropped
  * without the flag.
  *
- * exit 0 written; exit 1 no own record long enough, a path would be dropped, or
- * the file could not be written (the existing baseline is kept); exit 2 no
- * `--source`, or an argument other than `--source <text>` / `--allow-drop`.
+ * #4640 P3-1: a current baseline that reads neither `ok` nor `missing` (corrupt)
+ * has no paths to compare against, so it too stops the write without
+ * `--allow-drop` (one line on stderr says why).
+ *
+ * exit 0 written; exit 1 no own record long enough, a path would be dropped, the
+ * current baseline is corrupt, or the file could not be written (the existing
+ * baseline is kept); exit 2 no `--source`, a `--source` value that begins with
+ * `--`, or an argument other than `--source <text>` / `--allow-drop`.
  *
  * @param {string[]} argv the arguments after `--write-baseline`
  * @param {{ root: string, log: (msg: string) => void, now: () => Date, readCache: typeof readDurationCache, readStore: typeof readDurationStore, readBaseline: typeof readBaselineDurations }} deps
@@ -823,7 +828,15 @@ function writeBaseline(argv, { root, log, now, readCache, readStore, readBaselin
   let source = null;
   let allowDrop = false;
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--source' && source === null && i + 1 < argv.length && argv[i + 1].trim()) {
+    // #4640 P3-2: a value that begins with `--` is another flag, not the source
+    // (`--source --allow-drop` used to record the source as "--allow-drop").
+    if (
+      argv[i] === '--source' &&
+      source === null &&
+      i + 1 < argv.length &&
+      argv[i + 1].trim() &&
+      !argv[i + 1].startsWith('--')
+    ) {
       source = argv[i + 1];
       i++;
     } else if (argv[i] === '--allow-drop' && !allowDrop) {
@@ -844,9 +857,18 @@ function writeBaseline(argv, { root, log, now, readCache, readStore, readBaselin
     console.error(`${LOG_PREFIX} write-baseline: no own record of ${BASELINE_MIN_MS} ms or more; ${BASELINE_FILE} not written`);
     return 1;
   }
+  const current = readBaseline({ root });
+  // #4640 P3-1: a baseline that reads neither ok nor missing has no paths to
+  // compare against (a corrupt file is an empty Map), so the count of dropped
+  // paths would be 0 and a partial worktree would overwrite it silently.
+  if (current.status !== 'ok' && current.status !== 'missing' && !allowDrop) {
+    console.error(
+      `${LOG_PREFIX} write-baseline: the current ${BASELINE_FILE} is ${current.status}${current.error ? ` (${current.error})` : ''}; not written (--allow-drop writes it)`
+    );
+    return 1;
+  }
   // #4640: a baseline path this write would lose, whose file is still there.
   const written = new Set(keys);
-  const current = readBaseline({ root });
   const dropped = [...current.durations.keys()]
     .filter((rel) => !written.has(rel) && fs.existsSync(path.join(root, rel)))
     .sort();
