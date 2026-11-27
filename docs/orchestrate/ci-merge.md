@@ -233,6 +233,16 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 
 `Closes #N` による自動クローズは base が既定ブランチ（main）の PR でしか効かない。develop 向けの PR では `closingIssuesReferences` が空になり、マージしても Issue は閉じない（異常ではない）。`merge-pr.mjs` を通さずにマージしたときは、`gh pr view <PR> --json state -q .state` が `MERGED` であることを確かめてから `gh issue close <N> --reason completed` で閉じる。マージの成否を見ずに同じループで close しない（`gh pr merge` が失敗しても後のコマンドは走る）。
 
+## 6-2 範囲の外の P3 と受け入れ待ちの bug
+
+S12 の手当て 5（人の承認 2026-11-27）。
+
+- **起票の基準**: レビュー・受け入れの範囲の外で P3 のものは、新しい Issue にせず、親の Issue の追跡の表に 1 行で置く。新しい bug の Issue にするのは、develop で赤になる再現がある P1・P2 だけ
+- **ラベル `merged-awaiting-accept`**: マージ済みで受け入れを待つ bug（`merge-pr.mjs --close -` で開いたまま残したもの）に付け、受け入れで閉じるときに外す（ラベルの作成は人の承認の後）
+- **類似の bug**: 同じ真因の塊の bug は 1 つの Issue にまとめ、残りはその Issue の表の行にして閉じる（人の決定 11-28 00:24）
+- **同じ種類の指摘の一覧**（`workspace/orchestration/same-kind-findings.md`）の行には、「探した範囲と残った場所」と「ゲート（試験の名前）」の列も書く（人の決定 11-28 00:24）
+- **台帳の数**: PM の台帳（`pm-ledger-s<N>.md`）の残りの bug の数は「直していない」と「受け入れ待ち（`merged-awaiting-accept`）」の 2 列に分けて数える
+
 ## 6-2 道具を変えた PR のマージの後
 
 見張り・契約・待ちの道具（`.claude/skills/orchestrate-monitor/**`・`scripts/orchestrate/**`）を変える PR がマージされたら、PM が primary checkout を `git pull --ff-only origin develop` する（#4574。primary が古い版のまま見張りが動き、リーダーが止まった）。
