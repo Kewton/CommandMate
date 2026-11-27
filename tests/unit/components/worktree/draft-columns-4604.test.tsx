@@ -24,6 +24,15 @@
  * handed back, going to i1's To now) · `otherTabValue` (another tab writes a value back — a tag, or a new
  * "unknown" — with its event) · `yYes` (Y opens i1's draft, presses Enter, says yes when asked, and goes).
  *
+ * Issue #4604 accept r1d (PM の処分, 案 A = 案 i + INV-S1 の広げ): the model's rule for a saved text — a
+ * composer that writes its text into the store writes first every mark it holds (received or taken in).
+ * So, after every step: each handed-back word in a stored text has its mark in the store next to it (a tag
+ * naming its original, or an "unknown" — then everyone asks) — whoever opens that text asks. Checked in
+ * the r1d seeds and the r1d fixed columns (`checkStore`), from the step a word is handed back (the 409's
+ * refusal, `return`, another tab's 409); a sequence that has made the store fail (`fault` rtSet / rtGet) is
+ * not checked from then on (the known limit: a mark that could not be stored). One more word for them:
+ * `otherTab409u` (another tab's 409 whose list did not fit: only the short "unknown" went in).
+ *
  * Seeds 1〜300, lengths 8〜20 (a small PRNG; a failing seed prints its sequence). Fixed columns F1・F2・F5・
  * F20・F21 (shape 3, V2-A)・F22 (V2-B, both shapes) in v4's form.
  *
@@ -145,6 +154,32 @@ class Ledger {
   dropped = new Set<string>();
   posts: Array<{ content: string; to: Target }> = [];
   violations: string[] = [];
+  /** r1d: the words handed back so far (the 409's refusal, `return`, another tab's 409). */
+  handedBack = new Set<string>();
+  /** r1d: the store failed in this sequence (from then on the saved-text rule is not checked). */
+  storeFailed = false;
+  /** r1d (INV-S1 の広げ): a stored text's handed-back words have their marks in the store next to it. */
+  checkStore(after: string) {
+    if (this.storeFailed) return;
+    for (const key of [K1, K2]) {
+      const text = rawStore().get(key) ?? '';
+      const raw = rawStore().get(getRetargetTagKey(key));
+      let marks: unknown = null;
+      try {
+        marks = raw === null ? null : JSON.parse(raw);
+      } catch {
+        marks = 'junk';
+      }
+      const asksAll = marks !== null && !Array.isArray(marks);
+      for (const w of text.split(/\s+/)) {
+        const original = this.returned.get(w);
+        if (!w || !this.handedBack.has(w) || !original || asksAll) continue;
+        const tags = Array.isArray(marks) ? (marks as Array<{ original?: Target }>) : [];
+        if (tags.some((tag) => tag.original !== undefined && same(tag.original, original))) continue;
+        this.violations.push(`after ${after}: ${w} is stored under ${key === K1 ? 'i1' : 'i2'} without its mark`);
+      }
+    }
+  }
   judge(content: string, to: Target, who: Poster) {
     this.posts.push({ content, to });
     for (const w of content.split(/\s+/)) {
@@ -169,6 +204,8 @@ let yAsked = false;
 let seq = 0;
 /** The composer whose POST the mock judges now (Y while Y is acting). */
 let poster: Poster = 'X';
+/** r1d: whether the saved-text rule is checked after each step. */
+let checkStore = false;
 
 async function flush() {
   for (let i = 0; i < 5; i++) {
@@ -191,12 +228,14 @@ beforeEach(() => {
   refuseNext = false;
   duringAwait = null;
   poster = 'X';
+  checkStore = false;
   world = { xInstance: I1, tools: { [I1]: 'codex', [I2]: 'codex' }, mounted: true, yMounted: false };
   sendMessageMock.mockReset();
   sendMessageMock.mockImplementation(async (_wt: string, content: string, options: { cliToolId: string; instanceId?: string }) => {
     const to = { instanceId: options.instanceId ?? options.cliToolId, cliToolId: options.cliToolId };
     if (refuseNext) {
       refuseNext = false;
+      for (const w of content.split(/\s+/)) if (w) ledger.handedBack.add(w);
       const meanwhile = duringAwait;
       duringAwait = null;
       meanwhile?.();
@@ -221,19 +260,25 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
-type Word = 'return' | 'type' | 'switch' | 'otherSend' | 'otherTab' | 'reload' | 'wait' | 'fault' | 'enter' | 'yes' | 'no' | 'rosterRefresh' | '409' | 'otherTab409' | 'otherTabValue' | 'yYes';
+type Word = 'return' | 'type' | 'switch' | 'otherSend' | 'otherTab' | 'reload' | 'wait' | 'fault' | 'enter' | 'yes' | 'no' | 'rosterRefresh' | '409' | 'otherTab409' | 'otherTabValue' | 'yYes' | 'otherTab409u';
 const WORDS: Word[] = ['return', 'type', 'switch', 'otherSend', 'otherTab', 'reload', 'wait', 'fault', 'enter', 'yes', 'no', 'rosterRefresh', '409'];
 /** r1c: the words of another tab's 409, its value-carrying writes and Y's yes — in their own seeds. */
 const WORDS_R1C: Word[] = [...WORDS, 'otherTab409', 'otherTabValue', 'yYes'];
+/** r1d: and another tab's 409 that could keep only the short "unknown" — with the saved-text rule. */
+const WORDS_R1D: Word[] = [...WORDS_R1C, 'otherTab409u'];
 
 /**
  * r1c: another tab's write through the one road — it reads the store as it is (no fault of this page),
  * and each write it makes reaches this page as a `StorageEvent` (`otherTabWrites`).
  */
-function otherTabRoad(draftKey: string, op: RetargetOp): void {
+function otherTabRoad(draftKey: string, op: RetargetOp, full = false): void {
   const storage: RetargetStorage = {
     getItem: (key) => rawStore().get(key),
-    setItem: (key, value) => otherTabWrites(key, value),
+    setItem: (key, value) => {
+      // r1d (`otherTab409u`): that tab's store is full — a long `:retarget` value does not go in.
+      if (full && value.length > 60) throw new Error('full');
+      otherTabWrites(key, value);
+    },
     removeItem: (key) => otherTabWrites(key, null),
   };
   writeRetarget(draftKey, op, { storage, unstorable: new Map() });
@@ -248,6 +293,7 @@ async function step(word: Word, arg = 0) {
       ledger.returned.set(w, original);
       act(() => {
         if (!returnRetargetedText(K1, { text: w, tag: newRetargetTag(original) })) ledger.words.delete(w); // not handed back (the toast's road)
+        else ledger.handedBack.add(w);
       });
       break;
     }
@@ -308,6 +354,7 @@ async function step(word: Word, arg = 0) {
     case 'fault': {
       const names: Fault[] = ['none', 'rtSet', 'rtGet', 'textGet2'];
       faults.set(FAULTS[names[arg % names.length]]);
+      if (names[arg % names.length] === 'rtSet' || names[arg % names.length] === 'rtGet') ledger.storeFailed = true;
       break;
     }
     case 'enter':
@@ -336,13 +383,18 @@ async function step(word: Word, arg = 0) {
       for (const w of ta('X').value.split(/\s+/)) if (w && !ledger.returned.has(w)) ledger.returned.set(w, to);
       break;
     }
-    case 'otherTab409': {
+    case 'otherTab409':
+    case 'otherTab409u': {
       // Another tab sent i1's stored text and the fence stopped it: its tag goes into the store (through
       // the one road, in that tab), with the event this page hears; the words are handed back there.
       const original = { instanceId: I1, cliToolId: world.tools[I1] };
-      for (const w of (rawStore().get(K1) ?? '').split(/\s+/)) if (w && !ledger.returned.has(w)) ledger.returned.set(w, original);
+      for (const w of (rawStore().get(K1) ?? '').split(/\s+/)) {
+        if (!w) continue;
+        if (!ledger.returned.has(w)) ledger.returned.set(w, original);
+        ledger.handedBack.add(w);
+      }
       act(() => {
-        otherTabRoad(K1, { kind: 'add', tags: [newRetargetTag(original)] });
+        otherTabRoad(K1, { kind: 'add', tags: [newRetargetTag(original)] }, word === 'otherTab409u');
       });
       break;
     }
@@ -380,6 +432,7 @@ async function step(word: Word, arg = 0) {
   }
   await flush();
   await flush();
+  if (checkStore) ledger.checkStore(word);
 }
 
 /** The end: every word is somewhere, or a toast said something could not be kept. */
@@ -432,6 +485,64 @@ describe('[#4604 accept r1c] seeded sequences with another tab\'s 409, its value
     const shown = words.map(([w, a]) => (w === 'fault' ? `fault:${a % 4}` : w)).join(' ');
     expect({ seed, sequence: shown, violations: ledger.violations }).toEqual({ seed, sequence: shown, violations: [] });
     await expectNothingLost();
+  });
+});
+
+describe('[#4604 accept r1d] seeded sequences with the saved-text rule (INV-S1 の広げ, seeds 1〜300)', () => {
+  const SEEDS = Array.from({ length: 300 }, (_, i) => i + 1);
+  it.each(SEEDS)('seed %i', async (seed) => {
+    checkStore = true;
+    const words = sequenceOf(seed, WORDS_R1D);
+    for (const [word, arg] of words) await step(word, arg);
+    const shown = words.map(([w, a]) => (w === 'fault' ? `fault:${a % 4}` : w)).join(' ');
+    expect({ seed, sequence: shown, violations: ledger.violations }).toEqual({ seed, sequence: shown, violations: [] });
+    await expectNothingLost();
+  });
+});
+
+describe('[#4604 accept r1d] fixed columns (INV-S1 の広げ: another tab\'s 409, it sends, X saves the text)', () => {
+  /** X shows i1's text; another tab's 409 (`which`); the tool changes; that tab sends; X types and saves. */
+  async function xSavesAfterOtherTabSent(which: 'otherTab409' | 'otherTab409u') {
+    checkStore = true;
+    await step('type');
+    await step('wait');
+    await step(which);
+    await step('rosterRefresh');
+    await step('otherTab');
+    await step('type');
+    await step('wait');
+  }
+
+  it('R1 (the review): …X reloads — Enter asks', async () => {
+    await xSavesAfterOtherTabSent('otherTab409');
+    await step('reload');
+    await step('enter');
+    expect(ledger.violations).toEqual([]);
+    expect(q('X', 'message-input-retarget-confirm')).not.toBeNull();
+  });
+
+  it('R2 (the review): …X switches away and back — Enter asks', async () => {
+    await xSavesAfterOtherTabSent('otherTab409');
+    await step('switch');
+    await step('switch');
+    await step('enter');
+    expect(ledger.violations).toEqual([]);
+    expect(q('X', 'message-input-retarget-confirm')).not.toBeNull();
+  });
+
+  it('R3: …a composer opens the draft afresh (Y) — it asks', async () => {
+    await xSavesAfterOtherTabSent('otherTab409');
+    await step('otherSend');
+    expect(ledger.violations).toEqual([]);
+    expect(yAsked).toBe(true);
+  });
+
+  it('R5: the short "unknown" (another tab\'s store is full) …X reloads — Enter asks', async () => {
+    await xSavesAfterOtherTabSent('otherTab409u');
+    await step('reload');
+    await step('enter');
+    expect(ledger.violations).toEqual([]);
+    expect(q('X', 'message-input-retarget-confirm')).not.toBeNull();
   });
 });
 

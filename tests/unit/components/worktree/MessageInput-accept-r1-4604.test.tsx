@@ -346,6 +346,9 @@ describe('[#4604 accept r1c] two tabs (real composers, a storage-event bridge): 
   let fullStore: boolean;
   let delivered: number;
   const DELIVERY_BOUND = 40;
+  // Three rounds of 600 ms saves and the bounded deliveries: past vitest's 5 s, a slow row would time out
+  // and run into the next test.
+  const BRIDGE_TIMEOUT_MS = 30_000;
 
   beforeEach(() => {
     slots = [{ tab: 'a', listener: null }, { tab: 'b', listener: null }];
@@ -448,7 +451,12 @@ describe('[#4604 accept r1c] two tabs (real composers, a storage-event bridge): 
     return asked;
   }
 
-  async function u41(full: boolean) {
+  /** r1d: `bTypesFirst` — B types (its save runs) before its first Enter, as a person who edits it does. */
+  /**
+   * r1d: `pinEveryRound` — instead of the asking ending, pin that each of three rounds asks in both tabs
+   * (and each send still goes once, after its yes): today's behaviour of a known-limit candidate.
+   */
+  async function u41(full: boolean, bTypesFirst = false, pinEveryRound = false) {
     window.localStorage.setItem(KEY, TEXT);
     sendMessageMock.mockRejectedValueOnce(fence());
     const view = render(<Tabs tool="codex" />);
@@ -471,12 +479,24 @@ describe('[#4604 accept r1c] two tabs (real composers, a storage-event bridge): 
     expect(sendMessageMock.mock.calls[1][2]).toMatchObject({ cliToolId: 'claude', instanceId: I });
     // Tab B still shows the same text: its Enter asks (POST 0).
     expect(ta('b').value).toBe(TEXT);
+    if (bTypesFirst) {
+      await as('b', () => {
+        fireEvent.change(ta('b'), { target: { value: `${TEXT} more` } });
+      }, 600);
+    }
     await as('b', () => enter('b'));
     expect(sendMessageMock).toHaveBeenCalledTimes(2);
     expect(band('b')).not.toBeNull();
     await as('b', () => yes('b'));
     expect(sendMessageMock).toHaveBeenCalledTimes(3);
     // The asking ends: within three rounds of new texts, a round where neither tab asks; the store ends empty.
+    if (pinEveryRound) {
+      const rounds: Array<Record<Tab, boolean>> = [];
+      for (let i = 0; i < 3; i += 1) rounds.push(await round());
+      expect(rounds).toEqual([{ a: true, b: true }, { a: true, b: true }, { a: true, b: true }]);
+      expect(sendMessageMock).toHaveBeenCalledTimes(9);
+      return;
+    }
     let last: Record<Tab, boolean> = { a: true, b: true };
     for (let i = 0; i < 3 && (last.a || last.b); i += 1) last = await round();
     expect(last).toEqual({ a: false, b: false });
@@ -485,11 +505,25 @@ describe('[#4604 accept r1c] two tabs (real composers, a storage-event bridge): 
 
   it('a list tag (the store works)', async () => {
     await u41(false);
-  });
+  }, BRIDGE_TIMEOUT_MS);
 
   it('the short "unknown" (U1-1: a long :retarget value throws at the 409)', async () => {
     await u41(true);
-  });
+  }, BRIDGE_TIMEOUT_MS);
+
+  // r1d (INV-S1 の広げ): B edits the text before its first send (its save writes the text) — still asks,
+  // and the asking ends once each tab, in turn, types a new text and sends.
+  it('INV-S1 の広げ — a list tag, B types before its first send: it asks, and the asking ends', async () => {
+    await u41(false, true);
+  }, BRIDGE_TIMEOUT_MS);
+
+  // 既知の限界の候補（人の判断待ち、#4604 受け入れ r1d）: 保存の空きが足りず短い「分からない」しか書けない
+  // 時、2 つのタブで打っては送ると毎回確かめる（安全側）。Each tab's save makes the "unknown" it took in its
+  // own (a new generation), the other tab takes that in, and a yes to an "unknown" is for one send — so
+  // while both tabs type before they send, every send asks. Pinned as today's behaviour (not an end).
+  it('INV-S1 の広げ — the short "unknown", B types before its first send: while both tabs type then send, every send asks (known-limit candidate, 人の判断待ち)', async () => {
+    await u41(true, true, true);
+  }, BRIDGE_TIMEOUT_MS);
 });
 
 describe('[#4604 accept r1c] O4 — a page that hears no event (known limit candidate, 人の判断待ち)', () => {
@@ -509,5 +543,129 @@ describe('[#4604 accept r1c] O4 — a page that hears no event (known limit cand
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
     expect(sendMessageMock.mock.calls[0][2]).toMatchObject({ cliToolId: 'claude', instanceId: I });
     expect(band('b')).toBeNull();
+  });
+});
+
+/*
+ * ---------------------------------------------------------------------------------------------
+ * Issue #4604 accept r1d (PM の処分: F1 は案 A = 案 i + INV-S1 の広げ). INV-S1 widened: a composer that
+ * writes its text into the store writes first the marks it holds then — the ones it received and the ones
+ * it took in — and the ones it took in become its own (its send lets them go). So while the store holds the
+ * text, it holds the text's marks: whoever opens the text asks. Rows Q1〜Q5 (the review's probe2):
+ * B took in A's mark, A sent (text, then marks, went from the store), B typed (its save wrote the text).
+ * ---------------------------------------------------------------------------------------------
+ */
+describe('[#4604 accept r1d] INV-S1 の広げ — the text B saves keeps the marks it took in', () => {
+  const type = (name: string, v: string) => act(() => {
+    fireEvent.change(ta(name), { target: { value: v } });
+  });
+  /** B shows the draft; A's 409 puts `aMarks` in (event); the tool changes; A sends (event); B types and saves. */
+  async function tookInThenASendsThenBSaves(aMarks: string) {
+    window.localStorage.setItem(KEY, TEXT);
+    const view = render(<One tool="codex" />);
+    await settle();
+    otherTabWrites(TAG_KEY, aMarks);
+    await settle();
+    view.rerender(<One tool="claude" />);
+    await settle();
+    otherTabWrites(KEY, null);
+    otherTabWrites(TAG_KEY, null);
+    await settle();
+    type('b', `${TEXT} more`);
+    await settle(700);
+    expect(rawStore().get(KEY)).toBe(`${TEXT} more`);
+    return view;
+  }
+  const LIST = JSON.stringify([tag('t-a')]);
+  const UNKNOWN = JSON.stringify({ unknown: 'g-a', tags: [] });
+
+  it('Q1: the saved text has its mark in the store; after a reload, Enter asks (POST 0)', async () => {
+    await tookInThenASendsThenBSaves(LIST);
+    expect(readRetargetTagState(KEY)).toEqual({ tags: [tag('t-a')], known: true });
+    cleanup();
+    render(<One tool="claude" />);
+    await settle();
+    expect(ta('b').value).toBe(`${TEXT} more`);
+    enter('b');
+    await settle(30);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(band('b')).not.toBeNull();
+  });
+
+  it('Q2: the tile switches away and back: Enter asks (POST 0)', async () => {
+    const view = await tookInThenASendsThenBSaves(LIST);
+    view.rerender(<One tool="claude" instanceId={I2} />);
+    await settle();
+    view.rerender(<One tool="claude" instanceId={I} />);
+    await settle();
+    expect(ta('b').value).toBe(`${TEXT} more`);
+    enter('b');
+    await settle(30);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(band('b')).not.toBeNull();
+  });
+
+  it('Q3: a new composer opens the saved text: its Enter asks (POST 0)', async () => {
+    await tookInThenASendsThenBSaves(LIST);
+    cleanup();
+    render(<One tool="claude" name="c" />);
+    await settle();
+    expect(ta('c').value).toBe(`${TEXT} more`);
+    enter('c');
+    await settle(30);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(band('c')).not.toBeNull();
+  });
+
+  it('Q5: the "unknown" B took in — the saved text is "unknown" in the store; after a reload, Enter asks (POST 0)', async () => {
+    await tookInThenASendsThenBSaves(UNKNOWN);
+    expect(readRetargetTagState(KEY).known).toBe(false);
+    cleanup();
+    render(<One tool="claude" />);
+    await settle();
+    enter('b');
+    await settle(30);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(band('b')).not.toBeNull();
+  });
+
+  it('Q1 then B\'s own send: the mark it made its own goes (the store ends empty), its next text is not asked about', async () => {
+    await tookInThenASendsThenBSaves(LIST);
+    enter('b');
+    await settle(30);
+    expect(band('b')).not.toBeNull();
+    yes('b');
+    await settle(30);
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect(rawStore().get(TAG_KEY)).toBeNull();
+    type('b', 'next one');
+    await settle(700);
+    enter('b');
+    await settle(30);
+    expect(sendMessageMock).toHaveBeenCalledTimes(2);
+    expect(band('b')).toBeNull();
+  });
+
+  it('Q4: the owner never sends (A\'s "unknown" stays in the store), B sends new texts: the asking ends, the store ends empty', async () => {
+    window.localStorage.setItem(KEY, 'b text');
+    render(<One tool="claude" />);
+    await settle();
+    otherTabWrites(TAG_KEY, UNKNOWN);
+    await settle();
+    const asks: boolean[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      type('b', `b text ${i}`);
+      await settle();
+      enter('b');
+      await settle(30);
+      asks.push(band('b') !== null);
+      if (band('b')) {
+        yes('b');
+        await settle(30);
+      }
+    }
+    expect(asks.at(-1)).toBe(false);
+    expect(sendMessageMock).toHaveBeenCalledTimes(3);
+    expect(rawStore().get(TAG_KEY)).toBeNull();
   });
 });
