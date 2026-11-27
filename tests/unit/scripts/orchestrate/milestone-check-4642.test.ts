@@ -89,7 +89,8 @@ interface World {
   prs: PrRow[];
   /** per branch rev-list count; 'fail' / 'timeout' allowed. */
   revList?: Record<string, number | 'fail' | 'timeout'>;
-  timeline?: Record<number, Array<{ event: string; createdAt: string; milestone?: string }> | 'fail'>;
+  /** REST shape, as `gh api …/timeline` prints it: the time is `created_at` (#4642 r2). */
+  timeline?: Record<number, Array<{ event: string; created_at?: string; milestone?: string }> | 'fail'>;
   roadmapComments?: string[] | 'fail';
   /** `gh issue view <N> --json number,state,milestone,labels` per hidden key (r1). */
   issueViews?: Record<number, { state: 'OPEN' | 'CLOSED'; milestone?: string | null; labels?: string[] } | 'fail' | 'timeout' | 'unparsable'>;
@@ -211,7 +212,8 @@ function fakeSpawn(w: World, calls: Call[], hooks: { before?: (c: Call) => void 
         const n = Number(/\/issues\/(\d+)\/timeline/.exec(args[args.length - 1])?.[1]);
         const events = w.timeline?.[n] ?? [];
         if (events === 'fail') return { status: 1, stdout: '', stderr: 'boom' };
-        return ok(JSON.stringify(events.map((e) => ({ event: e.event, createdAt: e.createdAt, milestone: e.milestone ? { title: e.milestone } : null }))));
+        // The REST shape: `created_at`, and a non-milestone event has no time at all.
+        return ok(JSON.stringify(events.map((e) => ({ event: e.event, ...(e.created_at === undefined ? {} : { created_at: e.created_at }), milestone: e.milestone ? { title: e.milestone } : null }))));
       }
       if (args[0] === 'issue' && args[1] === 'list') {
         const f = fail('issueList');
@@ -873,6 +875,34 @@ describe('T5 settings', () => {
   });
 });
 
+describe('T5b --plan that cannot be read as a plan is exit 2, never an empty plan (#4642 r2)', () => {
+  it.each([
+    ['the file does not exist', null],
+    ['not YAML', 'items: [unclosed\n'],
+    ['items is not a list', 'version: 1\nitems: 5\n'],
+    ['no items key', 'version: 1\nwaves: []\n'],
+    ['an item that is not a mapping', 'version: 1\nitems: [3]\n'],
+    ['an item without a string id', 'version: 1\nitems:\n  - { gates: [lint] }\n'],
+    ['an item id that is a number', 'version: 1\nitems:\n  - { id: 4642 }\n'],
+  ])('%s: exit 2 and no gh call', async (_name, text) => {
+    const w = t1World('OPEN', 'current', 'none');
+    const file = path.join(w.root, 'plan.yaml');
+    if (text !== null) fs.writeFileSync(file, text);
+    const r = await runCli(w, ['check', '--json', '--plan', file, '--no-history']);
+    expect(r.code).toBe(2);
+    expect(r.calls.filter((c) => c.cmd === 'gh')).toEqual([]);
+  });
+
+  it('(negative control) a well-formed plan is read and the Issue in it is M2-planned', async () => {
+    const w = t1World('OPEN', 'current', 'none');
+    const file = path.join(w.root, 'plan.yaml');
+    fs.writeFileSync(file, 'version: 1\nitems:\n  - { id: "500-a1", gates: [lint] }\n');
+    const r = await runCli(w, ['check', '--json', '--plan', file, '--no-history']);
+    expect(r.code).toBe(0);
+    expect((r.json.rows as Triple[]).filter((x) => x.issue === 500).map((x) => x.kind)).toEqual(['M2-planned']);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // T6: summary --md, verbatim
 // ---------------------------------------------------------------------------
@@ -1005,7 +1035,7 @@ function t7World(current = 'Sprint 13'): World {
     worktrees,
     prs,
     revList: { 'feature/4546-pr3': 3, 'fix/4604-one-value': 0 },
-    timeline: { 4604: [{ event: 'milestoned', createdAt: '2026-11-27T15:34:00Z', milestone: 'Sprint 13' }] },
+    timeline: { 4604: [{ event: 'milestoned', created_at: '2026-11-27T15:34:00Z', milestone: 'Sprint 13' }] },
     roadmapComments: ['2026-11-27T15:43:00Z'],
   });
 }
@@ -1048,11 +1078,42 @@ describe('T7 today’s drift (Sprint 12/13 fixture)', () => {
     expect(m1).toEqual([4621, 4631, 4632, 4640]);
   });
 
+  it('M6 (real REST shape, copied from #4604): the time is `created_at`, so the record date decides', async () => {
+    // The two lines the leader read from the real timeline of #4604 (2026-11-27): a move into
+    // Sprint 12, then one into Sprint 13. The fake answers the same REST shape.
+    const realLines = [
+      { event: 'milestoned', created_at: '2026-11-26T15:52:44Z', milestone: { title: 'Sprint 12' } },
+      { event: 'demilestoned', created_at: '2026-11-27T15:34:28Z', milestone: { title: 'Sprint 12' } },
+    ];
+    // #4604 sits in the current Sprint, so its timeline is read (M6's range, design §3).
+    const sprints = () => ({ milestones: [
+      { title: 'Sprint 13', state: 'open' as const, open: 1 },
+      { title: 'Sprint 12', state: 'open' as const, open: 1 },
+      { title: 'Sprint 7', state: 'closed' as const, open: 0 },
+    ], issues: [
+      { number: 4604, state: 'OPEN' as const, title: 'move', milestone: 'Sprint 13' },
+    ] });
+    // The move at 15:34:28 is before this record → not M6; that proves `created_at` is read.
+    const before = worldWith(DEFAULT_YAML, sprints());
+    before.roadmapComments = ['2026-11-27T15:43:00Z'];
+    before.override = { [`gh api --paginate repos/${REPO}/issues/4604/timeline?per_page=100`]: { status: 0, stdout: JSON.stringify(realLines) } };
+    const r1 = await runCli(before, ['check', '--json']);
+    expect((r1.json.rows as Triple[]).some((x) => x.kind === 'M6-unrecorded-move')).toBe(false);
+    // The same move against an earlier record → M6, with the time it carried (never `(no time)`).
+    const after = worldWith(DEFAULT_YAML, sprints());
+    after.roadmapComments = ['2026-11-27T15:30:00Z'];
+    after.override = { [`gh api --paginate repos/${REPO}/issues/4604/timeline?per_page=100`]: { status: 0, stdout: JSON.stringify(realLines) } };
+    const r2 = await runCli(after, ['check', '--json']);
+    const m6 = (r2.json.rows as Array<Triple & { detail: string }>).find((x) => x.kind === 'M6-unrecorded-move');
+    expect(m6?.detail).toContain('2026-11-27T15:34:28Z');
+    expect(m6?.detail).not.toContain('(no time)');
+  });
+
   it('M6 (two pages): a `--paginate` answer of two concatenated arrays reads as one list', async () => {
     const w = t7World();
     w.roadmapComments = ['2026-11-27T15:30:00Z'];
-    const page1 = JSON.stringify([{ event: 'labeled', createdAt: null }]);
-    const page2 = JSON.stringify([{ event: 'milestoned', createdAt: '2026-11-27T15:34:00Z', milestone: { title: 'Sprint 13' } }]);
+    const page1 = JSON.stringify([{ event: 'labeled' }]);
+    const page2 = JSON.stringify([{ event: 'milestoned', created_at: '2026-11-27T15:34:00Z', milestone: { title: 'Sprint 13' } }]);
     w.override = { [`gh api --paginate repos/${REPO}/issues/4604/timeline?per_page=100`]: { status: 0, stdout: `${page1}${page2}` } };
     const r = await runCli(w, ['check', '--json']);
     expect(r.json.unknown.some((u: string) => u.includes('timeline'))).toBe(false);

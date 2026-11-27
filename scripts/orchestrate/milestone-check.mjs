@@ -408,12 +408,13 @@ export function parseJsonSequence(text) {
 }
 
 /**
- * `gh api …/timeline` rows, or null when the JSON or a row's shape is wrong. Each row keeps the
- * milestone events only: other event kinds (`labeled`, `commented`, `cross-referenced`, …) need
- * not carry `createdAt` at all — GitHub omits it on several of them — so a row whose `event` is
- * not one of the two the check reads is skipped rather than failing the whole page (#4642, the
- * real run of 2026-11-27), and a readable move without a `createdAt` is kept with `null`.
- * `--paginate` returns one array per page, joined by parseJsonSequence.
+ * `gh api …/timeline` rows, or null when the JSON or a row's shape is wrong. This is the REST
+ * shape, so the time is `created_at` (snake case) — `createdAt` is not there (verified against
+ * the real timeline of #4604 on 2026-11-27, #4642 r2). Each row keeps the milestone events only:
+ * other event kinds (`labeled`, `commented`, `cross-referenced`, …) need not carry a time at
+ * all, so a row whose `event` is not one of the two the check reads is skipped rather than
+ * failing the whole page; a readable move without a time is kept with `null`. `--paginate`
+ * returns one array per page, joined by parseJsonSequence.
  * @param {string} text
  */
 export function parseTimeline(text) {
@@ -422,7 +423,7 @@ export function parseTimeline(text) {
   const rows = [];
   for (const item of data) {
     if (!isMapping(item)) return null;
-    const { event, createdAt, milestone } = item;
+    const { event, created_at: createdAt, milestone } = item;
     if (typeof event !== 'string') return null;
     if (event !== 'milestoned' && event !== 'demilestoned') continue;
     if (createdAt !== null && createdAt !== undefined && typeof createdAt !== 'string') return null;
@@ -436,7 +437,12 @@ export function parseTimeline(text) {
   return rows;
 }
 
-/** The comments' `createdAt` in order, or null. @param {string} text */
+/**
+ * The comments' `createdAt` in order, or null (`gh issue view --json comments` is gh's own JSON
+ * shape, where the field really is `createdAt` — do not mix it with the REST timeline's
+ * `created_at`, #4642 r2).
+ * @param {string} text
+ */
 export function parseComments(text) {
   let data;
   try {
@@ -535,8 +541,9 @@ export function judge(input) {
   const rows = [];
   for (const n of [...candidates].sort((a, b) => a - b)) {
     const observed = issueMap.get(n);
-    // A key in none of the read lists is not observable: no allowed read says whether it is
-    // open, so it is read as OPEN with no milestone (design §2.4, a documented limitation).
+    // A key no read list held is read with `gh issue view` before judging (design §2.4), so it
+    // is in `issueMap` with its real state and Milestone. The fallback below is only for a key
+    // that read could not cover; it is not a reading of "no Milestone".
     const state = observed ? observed.state : 'OPEN';
     const milestone = observed ? observed.milestone : null;
     if (state !== 'OPEN') continue;
@@ -665,13 +672,13 @@ function runMain(argv, deps, stdout, stderr) {
       return configError(`--plan ${planPath} is not valid YAML`);
     }
     planKeys = new Set();
-    if (isMapping(doc) && Array.isArray(doc.items)) {
-      for (const item of doc.items) {
-        if (isMapping(item) && typeof item.id === 'string') {
-          const key = keysFromPlanItem(item.id);
-          if (key !== null) planKeys.add(key);
-        }
-      }
+    // A plan that cannot be read as a plan is a usage error, never an empty plan: reading it as
+    // empty would make every unstarted Issue of the current Milestone M2 (#4642 r2, I2's kind).
+    if (!isMapping(doc) || !Array.isArray(doc.items)) return configError(`--plan ${planPath} has no items list`);
+    for (const item of doc.items) {
+      if (!isMapping(item) || typeof item.id !== 'string') return configError(`--plan ${planPath} has an item without a string id`);
+      const key = keysFromPlanItem(item.id);
+      if (key !== null) planKeys.add(key);
     }
   }
 

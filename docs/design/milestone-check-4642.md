@@ -57,12 +57,13 @@ M1 の判定に要る Issue の Milestone は、current・前・後の Sprint �
 | `M4-previous-sprint` 前の Sprint の残り | 前の open な Sprint の Milestone に OPEN の Issue がある（1 Issue 1 行） | drift |
 | `M5-closed-leftover` closed な Milestone の残り | closed な Milestone の `open_issues` が 1 以上（Milestone 1 行、数つき、`issue` は `null`） | drift |
 | `M5-empty-previous` 空の前の Sprint | 前の open な Sprint で `open_issues` 0（リリース待ち） | info |
-| `M6-unrecorded-move` 記録の無い移動 | current と前の open な Sprint の Issue の timeline の `milestoned`／`demilestoned` で、`roadmapIssue` の最後のコメントの `createdAt` より後のもの（1 出来事 1 行） | drift |
+| `M6-unrecorded-move` 記録の無い移動 | current と前の open な Sprint の Issue の timeline の `milestoned`／`demilestoned` で、`roadmapIssue` の最後のコメントの `createdAt` より後のもの（1 出来事 1 行。timeline は REST の形なので時刻は `created_at`、コメントは gh の JSON で `createdAt`） | drift |
 
 - 「作業が始まっている」＝ unmerged-worktree・fresh-worktree・open-pr のどれか。計画の item は「割り当て」で、M2 の未着手／残留を分け、M1 の証拠にはなるが進行中ではない。
 - 証拠の鍵の Issue が CLOSED なら、M1 にしない（情報も出さない）。
 - 1 つの Issue が複数の kind に当たれば、全部の行を出す。
 - 並びは Issue 番号の順、同じ番号の中は kind の順（上表の順）。`issue` が `null` の行（M5）は番号の後ろに置く。
+- **M6 が見る範囲**（#4642 の中の残り）: M6 は current への移動だけを見る。timeline を読むのは current と前の open な Sprint の Issue だけなので、current から後の Sprint・Milestone なしへ送った移動（人の Q6 の範囲）の検出は **#4642 の次の PR** で足す。この PR は読む経路を増やさない。
 
 ### 3.1 作業の証拠（Issue ごと）
 
