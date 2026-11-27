@@ -38,6 +38,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import { stripAnsi } from '@/lib/detection/ansi';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
 import {
   CODEX_COMPOSER_CLOSING_STATUS_BAR_PATTERNS,
@@ -182,7 +183,8 @@ describe('#4573 the status-bar patterns cli-patterns.ts copies', () => {
 });
 
 // ---------------------------------------------------------------------------
-// The range table (s12/review-4573-pr1-range.md §1, 20 rows A–Q). Each row is
+// The range table (s12/review-4573-pr1-range.md §1, 20 rows A–Q, plus R1 from
+// review-4573-pr1-r4 P3-2). Each row is
 // a screen built from the judge's frame (`U`), real fixtures and #3205's tc104,
 // and the verdict the BOTTOM of that screen calls for: a dialog below a stale
 // composer → waiting / prompt; only text typed into the live composer → ready.
@@ -206,6 +208,13 @@ const RANGE_DIALOG_TAIL = [
 const RANGE_PAD = '\n'.repeat(900);
 const RANGE_BAR = '  gpt-5.6-sol default · ~/accrepo-feature-a';
 const RANGE_SGR_COMPOSER = `${ESC}[1m›${ESC}[0m `;
+// tc104 with its real status bar stripped of SGR, so the plain bar sits below
+// the typed bar-looking row: the bottom-most bar has no `› N.` below it.
+const RANGE_TC104_ROWS = RANGE_TC104.split('\n');
+const RANGE_TC104_BAR = RANGE_TC104_ROWS.findIndex(r => /GPT-6\.1-Sol/.test(r));
+const RANGE_TC104_PLAIN_BAR = RANGE_TC104_ROWS.map((r, i) =>
+  i === RANGE_TC104_BAR ? stripAnsi(r) : r,
+).join('\n');
 const WAITING_PROMPT: RangeExpect = { status: 'waiting', prompt: true };
 const READY: RangeExpect = { status: 'ready', prompt: false };
 
@@ -307,11 +316,22 @@ const RANGE_TABLE: [string, string, RangeExpect][] = [
     `${RANGE_HIST}\n  Would you like to run the following command?\n› 1. Yes, proceed (y)\n  2. Yes, allow writes · ~/accrepo-feature-a\n  3. No (esc)\n\n  Press enter to confirm or esc to cancel${RANGE_PAD}`,
     { prompt: false },
   ],
+  [
+    // review-4573-pr1-r4 P3-2: pins "the BOTTOM-most bar", not the first one
+    // below the composer (the first is the typed row, which has `› 1.` below).
+    'R1: F with tc104\'s real bar drawn without SGR',
+    RANGE_TC104_PLAIN_BAR.replace(
+      '  › 1. Yes, proceed (y)',
+      '  gpt-5 default · ~/repo\n  › 1. Yes, proceed (y)',
+    ),
+    READY,
+  ],
 ];
 
 describe('#4573 range table (review-4573-pr1-range §1)', () => {
-  it('has the 20 rows A–Q', () => {
-    expect(RANGE_TABLE).toHaveLength(20);
+  it('has the 21 rows A–Q and R1', () => {
+    expect(RANGE_TC104_BAR).toBeGreaterThan(0);
+    expect(RANGE_TABLE).toHaveLength(21);
   });
 
   it.each(RANGE_TABLE)('%s', (_label, frame, want) => {
