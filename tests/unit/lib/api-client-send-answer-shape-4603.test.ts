@@ -242,30 +242,30 @@ interface Q1Row {
 }
 
 const J = JSON_TYPE;
-const ISSUE_4632 = 'https://github.com/Kewton/CommandMate/issues/4632';
 
 const Q1_ROWS: Q1Row[] = [
   // ChatMessage, by `sendOutcome`
   { name: 'S1 ChatMessage', answer: wire(201, J, MSG), cli: 'sent', cliRow: 'S1' },
   { name: "S1 ChatMessage, sendOutcome 'sent'", answer: wire(201, J, { ...MSG, sendOutcome: 'sent' }), cli: 'sent', cliRow: 'S1' },
   { name: "S2 ChatMessage, sendOutcome 'unknown'", answer: wire(201, J, { ...MSG, sendOutcome: 'unknown' }), cli: 'sent', cliRow: 'S2' },
+  // #4632: the screen reads the same table now, so these four are filled (no longer todo).
   {
     name: "ChatMessage, sendOutcome 'not_sent'", answer: wire(201, J, { ...MSG, sendOutcome: 'not_sent' }),
-    cli: 'unknown', cliRow: 'S4', screen: 'sent', mark: { todo: ISSUE_4632 },
+    cli: 'unknown', cliRow: 'S4',
   },
   {
     name: 'ChatMessage, sendOutcome not one of the three', answer: wire(201, J, { ...MSG, sendOutcome: 'maybe' }),
-    cli: 'unknown', cliRow: 'S4', screen: 'sent', mark: { todo: ISSUE_4632 },
+    cli: 'unknown', cliRow: 'S4',
   },
   // ChatMessage with an `ask`
   { name: "ChatMessage + ask.sendState 'sent'", answer: wire(201, J, { ...MSG, ask: { sendState: 'sent' } }), cli: 'sent', cliRow: 'S1' },
   {
     name: "ChatMessage + ask.sendState 'not_sent'", answer: wire(201, J, { ...MSG, ask: { sendState: 'not_sent' } }),
-    cli: 'unknown', cliRow: 'S1', screen: 'sent', mark: { todo: `${ISSUE_4632} (from before #4603; the screen never sends an ask)` },
+    cli: 'unknown', cliRow: 'S1',
   },
   {
     name: "ChatMessage + ask.sendState 'send_unknown'", answer: wire(201, J, { ...MSG, ask: { sendState: 'send_unknown' } }),
-    cli: 'unknown', cliRow: 'S1', screen: 'sent', mark: { todo: `${ISSUE_4632} (from before #4603; the screen never sends an ask)` },
+    cli: 'unknown', cliRow: 'S1',
   },
   // `ask` only
   {

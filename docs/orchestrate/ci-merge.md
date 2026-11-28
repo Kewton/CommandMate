@@ -233,6 +233,12 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 
 `Closes #N` による自動クローズは base が既定ブランチ（main）の PR でしか効かない。develop 向けの PR では `closingIssuesReferences` が空になり、マージしても Issue は閉じない（異常ではない）。`merge-pr.mjs` を通さずにマージしたときは、`gh pr view <PR> --json state -q .state` が `MERGED` であることを確かめてから `gh issue close <N> --reason completed` で閉じる。マージの成否を見ずに同じループで close しない（`gh pr merge` が失敗しても後のコマンドは走る）。
 
+## 6-2 範囲の外の P3 と受け入れ待ちの bug
+
+起票の基準（範囲の外の P3・新しい bug にする P1・P2）・ラベル（`needs-rca`・`rca-ready`・`merged-awaiting-accept`）・類似の bug のまとめ方・台帳の bug の数の正本は [bug-flow.md](bug-flow.md)（人の決定 ③ 2026-11-28）。
+
+- **同じ種類の指摘の一覧**（`workspace/orchestration/same-kind-findings.md`）の行には、「探した範囲と残った場所」と「ゲート（試験の名前）」の列も書く（人の決定 11-28 00:24）
+
 ## 6-2 道具を変えた PR のマージの後
 
 見張り・契約・待ちの道具（`.claude/skills/orchestrate-monitor/**`・`scripts/orchestrate/**`）を変える PR がマージされたら、PM が primary checkout を `git pull --ff-only origin develop` する（#4574。primary が古い版のまま見張りが動き、リーダーが止まった）。

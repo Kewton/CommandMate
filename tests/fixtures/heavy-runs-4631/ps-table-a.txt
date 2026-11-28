@@ -1,0 +1,21 @@
+    1     0 /sbin/launchd    /sbin/launchd
+  500     1 /bin/zsh         -zsh
+  600   500 node             node /work/a/scripts/orchestrate/merge-pr.mjs --run-dir /work/runs/s0 --issues 1-9 --issue 1 --worktree /work/a
+  601   600 node             node /work/a/scripts/orchestrate/merge-pr.mjs --run-dir /work/runs/s0 --issues 1-9 --issue 1 --worktree /work/a
+  602   601 node             node /work/a/scripts/orchestrate/precheck.mjs --run-dir /work/runs/s0 --issues 1-9 --issue 1 --worktree /work/a
+  603   602 node             node /work/a/scripts/orchestrate/precheck.mjs --run-dir /work/runs/s0 --issues 1-9 --issue 1 --worktree /work/a --force
+  700     1 node             node /work/b/node_modules/.bin/vitest run tests/unit/scripts/orchestrate
+  701   700 node             node /work/b/node_modules/vitest/dist/workers/forks.js
+  702   700 /opt/node/bin/node /opt/node/bin/node /work/b/node_modules/vitest/dist/workers/forks.js
+  710     1 node             node /work/c/node_modules/.bin/next build
+  720     1 node             node /work/d/scripts/orchestrate/precheck.mjs --run-dir /work/runs/s0 --issues 1-9 --issue 2 --worktree /work/d
+  730     1 /bin/bash        /bin/bash /work/e/scripts/verify-run.sh unit
+  800   500 /bin/zsh         zsh -c until ! pgrep -f 'vitest|next build'; do sleep 15; done; npx vitest run tests/unit/x.test.ts
+  801   500 /bin/zsh         zsh -c until [ -z "$(ps -axo comm=,args= | awk '($1 ~ /(^|\/)node$/ && /vitest|next build|precheck\.mjs/) || ($1 ~ /(^|\/)bash$/ && /verify-run\.sh/)')" ]; do sleep 15; done; npx vitest run tests/unit/x.test.ts
+  802   500 grep             grep -q 走行中 /work/runs/s0/pm-verify-queue.md
+  803     1 node             node /work/f/scripts/orchestrate/wait-verify.mjs --run-dir /work/runs/s0 --issues 1-9 --issue 3 --wt wt-3 --worktree /work/f --instance claude
+  804   500 less             less /work/b/vitest.log
+  805   500 /bin/sh          sh -c /work/e/scripts/verify-run.sh unit
+  806   500 /bin/bash        /bin/bash -c npx vitest run tests/unit/x.test.ts
+  807   500 pgrep            pgrep -f vitest|next build
+  808   603 ps               ps -axo pid=,ppid=,comm=,args=

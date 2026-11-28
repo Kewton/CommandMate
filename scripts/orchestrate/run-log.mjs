@@ -341,11 +341,42 @@ export function findLatest(records, criteria) {
  * `criteria` (as findLatest reads them, `stage` aside) that precheck.mjs wrote
  * itself — a line added by hand (isHandPrecheck) is passed over, so its missing
  * env= and options are never taken for the tool's. Only a hand line: null, as
- * when there is no record. merge-pr, publish (pr-common.mjs missingRecords) and
- * the train all read the precheck by this one rule.
+ * when there is no record. The scripts do not call it with their own criteria:
+ * every reader picks its line by precheckFor below (#4617), which reads through it.
  */
 export function gatePrecheck(records, criteria) {
   return findLatest((records ?? []).filter((record) => !isHandPrecheck(record)), { ...criteria, stage: 'precheck' });
+}
+
+/**
+ * The latest precheck precheck.mjs wrote itself on `head` (any result; a hand line,
+ * isHandPrecheck, never counts), or null. Without a HEAD there is none: it never
+ * falls back to another HEAD.
+ */
+export function toolPrecheck(records, { issue, item, head }) {
+  if (!head) return null;
+  return gatePrecheck(records, { issue, item, head });
+}
+
+/** The roles of the precheck record's readers and the HEAD each reads (#4614, #4617). */
+export const PRECHECK_ROLES = ['gate', 'options'];
+
+/**
+ * The one precheck record a reader takes (#4614, #4617): the latest line
+ * precheck.mjs wrote (toolPrecheck) on the HEAD of its role.
+ *   - `gate`: the published HEAD `head` — a precheck stands for the HEAD that is
+ *     published (WORK_STAGES leaves it out). precheck.mjs's reuse, merge-pr's
+ *     env check and its CI wait, and missingRecords read this.
+ *   - `options`: the work HEAD `workHead`, else `head` (a fold on top made the
+ *     precheck run on the published HEAD only) — never any other HEAD. merge-pr's
+ *     re-run and the train take the options from it; merge-pr passes as `head` the
+ *     HEAD before its own refresh (the PR's), whose merge has no precheck yet.
+ * When `head` is `workHead` both roles take the same line.
+ */
+export function precheckFor(records, { issue, item, role, head, workHead }) {
+  if (role === 'gate') return toolPrecheck(records, { issue, item, head });
+  if (role === 'options') return toolPrecheck(records, { issue, item, head: workHead }) ?? toolPrecheck(records, { issue, item, head });
+  throw new Error(`precheckFor: role must be one of ${PRECHECK_ROLES.join(' / ')} (got ${role})`);
 }
 
 /** The latest record of each stage for one Issue (any HEAD), or for one of its work items (`item`, inItem). */

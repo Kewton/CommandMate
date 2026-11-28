@@ -309,13 +309,15 @@ export function getPendingTimerCountByWorktree(
 /**
  * Delete non-pending, non-sending timers older than retentionDays.
  * [SF-001] Pure DB function for testability.
+ * @param now - The time (ms) the cutoff is counted back from; defaults to Date.now() (Issue #4544).
  * @returns Number of deleted timers.
  */
 export function cleanupOldTimers(
   db: Database.Database,
-  retentionDays: number
+  retentionDays: number,
+  now: number = Date.now()
 ): number {
-  const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+  const cutoff = now - retentionDays * 24 * 60 * 60 * 1000;
   const result = db.prepare(`
     DELETE FROM timer_messages
     WHERE status NOT IN ('pending', 'sending')

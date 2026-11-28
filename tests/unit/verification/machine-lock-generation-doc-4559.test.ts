@@ -431,7 +431,8 @@ describe('#4559 T7 (PR-2): table F\'s mixed rows and §6.5, both ways', () => {
 
 // ---------------------------------------------------------------------- #4559 r7: §6.5's OLD-W-* and the changelog
 
-const CHANGELOG = path.join(REPO, 'changelog.d/4559.md');
+// The fragment until a release folds it into CHANGELOG.md (`changelog-fragments.mjs apply` deletes it), then CHANGELOG.md.
+const CHANGELOG = fs.existsSync(path.join(REPO, 'changelog.d/4559.md')) ? path.join(REPO, 'changelog.d/4559.md') : path.join(REPO, 'CHANGELOG.md');
 const OLD_W_UNTIL = '新版の bash（PR-3）が入り、旧い写し（cmate-verify・汎用シェル）が無くなるまで残る';
 
 /** The row names the changelog's window sentence lists (`混在の間に残る窓は … （<names>）だけ`). */

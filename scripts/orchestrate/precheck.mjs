@@ -69,12 +69,13 @@ import process from 'node:process';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { appendRecord, findLatest, readRecords } from './run-log.mjs';
+import { appendRecord, findLatest, precheckFor, readRecords } from './run-log.mjs';
 import { itemOption, workHeadOf } from './pr-common.mjs';
 import { dirtyPaths } from './dirty-tree.mjs';
 import { allocateLog, executionKey, workItemName } from './execution-key.mjs';
 import { diffManifest, manifestHash, takeManifest, verifyEnvState } from './env-manifest.mjs';
 import { LOCK_POLL_MS, acquireMachineLockSync as acquireTicketedLockSync } from './machine-lock-sync.mjs';
+import { heavyWaiter } from './heavy-runs.mjs';
 
 export const DEFAULT_BASE = 'origin/develop';
 /**
@@ -505,6 +506,15 @@ export function planSteps({ changed, deleted }, { base, kind, metrics = false, b
   return plan;
 }
 
+/**
+ * Whether a step's command starts what heavy-runs.mjs counts (#4631): vitest, or `npm run build` (next build).
+ *
+ * @param {[string, string[]]} command
+ */
+export function startsHeavyRun([cmd, args]) {
+  return args.includes('vitest') || (cmd === 'npm' && args[0] === 'run' && args[1] === 'build');
+}
+
 /** `name=status` pairs of a precheck / verify note. */
 export function parseNote(note) {
   /** @type {Record<string, string>} */
@@ -634,6 +644,7 @@ export function parseArgs(argv) {
  *   home?: string,
  *   log?: (line: string) => void,
  *   error?: (line: string) => void,
+ *   waitHeavy?: () => void,   before each vitest / next build step runs (#4631); only the entry gives the real one
  * }} [deps]
  * @returns {number} exit code
  */
@@ -690,7 +701,9 @@ export function main(argv, deps = {}) {
     // published HEAD, not for the worker's checks (run-log.mjs WORK_STAGES).
     const workHead = workHeadOf(run, o.worktree, head, { records, issue, item });
     if (!o.force) {
-      const previous = findLatest(records, { issue, item, stage: 'precheck', head });
+      // precheck.mjs's own latest record of this HEAD, never a line added by hand (#4614 run-log.mjs precheckFor).
+      // precheck-reader: R1
+      const previous = precheckFor(records, { issue, item, role: 'gate', head });
       if (previous && previous.result === 'ok') {
         const done = parseNote(previous.note);
         // A step left to CI counts as done only for another --heavy-to-ci precheck (#4265).
@@ -779,6 +792,11 @@ export function main(argv, deps = {}) {
         log(`  ${step} ${HELD} (not run: ${HEAVY_MUTEX} ${heldBy})`);
         continue;
       }
+      // No other heavy run on the machine before each one this precheck starts (#4631): before every
+      // vitest / next build step, not only the first — between two steps this precheck runs nothing
+      // counted, and another precheck's vitest that started in that gap is waited for here. Not a lock
+      // and not counted in mutexSec / runSec (only in durationSec): the split stays the lock's and the steps'.
+      if (startsHeavyRun(command)) deps.waitHeavy?.();
       const lock = heavy ? acquireHeavyLock(HEAVY_LOCK_TIMEOUT_SEC * 1000) : null;
       let waitNote = '';
       if (lock) {
@@ -854,4 +872,4 @@ export function main(argv, deps = {}) {
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isMain) process.exit(main(process.argv.slice(2)));
+if (isMain) process.exit(main(process.argv.slice(2), { waitHeavy: heavyWaiter({ label: 'precheck', precheckPeers: false }) }));

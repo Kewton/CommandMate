@@ -105,9 +105,9 @@ describe('gatePrecheck (#4589)', () => {
     const where = { runDir, worktree: tmp, home: tmp, warn };
     expect(missingRecords(records(), 4589, { head: HEAD_A, workHead: HEAD_A }, undefined, where)).toEqual([]);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('warning: precheck at aaaaaaa: no env= in the record'));
-    // An unmarked record of a later HEAD is the latest one, as before: this HEAD has no precheck.
+    // A record of a later HEAD does not hide this HEAD's own (#4617): the gate reads the line of the HEAD it judges.
     appendTool(HEAD_B, 'tsc=ok');
-    expect(missingRecords(records(), 4589, { head: HEAD_A, workHead: HEAD_A }, undefined)).toEqual(['precheck: no result for aaaaaaa (6-1-1)']);
+    expect(missingRecords(records(), 4589, { head: HEAD_A, workHead: HEAD_A }, undefined)).toEqual([]);
   });
 
   it('H6 (positive control): contract / send / verify / review / findings written by `append` carry no mark and are read as before', () => {

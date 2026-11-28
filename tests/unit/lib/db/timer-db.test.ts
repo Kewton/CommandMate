@@ -482,7 +482,7 @@ describe('timer-db', () => {
       const cutoff = now - 30 * 24 * 60 * 60 * 1000;
       db.prepare(`UPDATE timer_messages SET status = ?, created_at = ? WHERE id = ?`).run('sent', cutoff + 1, t.id);
 
-      const deleted = cleanupOldTimers(db, 30);
+      const deleted = cleanupOldTimers(db, 30, now);
       expect(deleted).toBe(0);
     });
 
@@ -493,7 +493,7 @@ describe('timer-db', () => {
       const cutoff = now - 30 * 24 * 60 * 60 * 1000;
       db.prepare(`UPDATE timer_messages SET status = ?, created_at = ? WHERE id = ?`).run('sent', cutoff - 1, t.id);
 
-      const deleted = cleanupOldTimers(db, 30);
+      const deleted = cleanupOldTimers(db, 30, now);
       expect(deleted).toBe(1);
     });
 

@@ -167,7 +167,7 @@ PR の前に `node scripts/count-suppressions.mjs --base origin/develop` を走�
 
 各 Issue の本文（1-1 で取得済み）から難易度を判定し、開発担当を決める。
 **優先順位**: `--claude-only` ＞ `--assign <N>=<agent>` ＞ 下の判定表。
-**目標: 仕事の 6〜8 割を Command Code で回す**（Sprint ごとにワーカーのモデルの割合を lead-return と台帳に数える）。
+**割合（6〜8 割は道具の後）・回す条件・実験の枠**: docs/orchestrate/command-code.md 1-2b（lead-return と台帳に数える）。
 
 **Claude に回す（1 つでも当てはまれば「難」）**
 
@@ -282,7 +282,7 @@ node scripts/orchestrate/run-log.mjs status --run-dir "workspace/orchestration/r
 実行計画を `workspace/orchestration/runs/$DATE/plan.md` に出力：
 - 対象Issue一覧（**難易度・担当・モデル・根拠**の列を含める。1-2b）
 
-  （列は Issue・種別・難易度・担当・モデル・根拠。根拠は観点を 1 行で書く）
+  （列は Issue・種別・難易度・担当・モデル・根拠・表の生成元（ファイル:関数。team.md §6 の 2 の領域で必須）。根拠は観点を 1 行で書く）
 根拠: docs/orchestrate/run-log.md#1-5-planmd-の対象-issue-表の例
 
 - `workspace/orchestration/runs/$DATE/assign.tsv` も同時に書く。1 行 = `<issue>\t<claude|command-code>\t<opus|sonnet|->`
@@ -290,6 +290,7 @@ node scripts/orchestrate/run-log.mjs status --run-dir "workspace/orchestration/r
 - 依存関係グラフ
 - 並列実行グループ
 - マージ推奨順序
+- レーンの次の 1 本（docs/orchestrate/workers.md#3-2-待ちの間の切り替え）
 
 ---
 
@@ -785,6 +786,7 @@ exit code は裁定（0 / 20 / 21）か wait のもの（10 / 124 …）なの�
 再検証の最中にコミットされた・合格なのに作業ツリーに未コミットの変更がある）。記録は `fail`。capture で状況を見て、待ち直すか再指示する。
 1 は記録の失敗、2 は引数の誤り。
 **合格行の HEAD が期待したもの（再指示・merge の後のもの）か確かめる。** ワーカーが何もしないままターンを終えると、前の HEAD で合格が返る。
+**流すのはレビューの処分が閉じた後の 1 回**（docs/orchestrate/verify-queue.md#正式な検証は最後に-1-回）
 
 ```bash
 # tasks.tsv（3-1）は 1 行 = "<issue>\t<WT>\t<AGENT>\t<TASK_ID>\t<MODEL>"。fd 3 から読む（3-1 の注と同じ理由）
@@ -811,9 +813,6 @@ done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
 
 - 再指示の後（3-4）は `--after-reinstruct --task "$TASK_ID" --signal-since "$SENT_AT"` を付ける。`--verify` を付けない wait → `verify --task` の 2 段になる。
   完了の合図は再指示の送信（`$SENT_AT`）より後のものだけを数える（前の試行の `IMPL_COMPLETED` は数えない）。`--signal-since` が無ければ呼び出しの開始から数える
-- `--verify` は完了検出**後**に全ゲート（`work-evidence` ＋ `scope` ＋ verify.yaml の宣言ゲート）を
-  実行し、その結果を exit code にする。ここが「完了したが壊れていた」を目視から exit code へ
-  移す一点である。
 - 契約の `gates` が `unit-related` のとき、`--verify` の裁定はテスト全体を含まない。テスト全体の合否は CI の `Unit Tests` で見る（6-2 の例外）。
 
 **Command Code 担当は、完了の合図（`IMPL_COMPLETED`）を確かめてから裁定する。**
@@ -1281,7 +1280,7 @@ summary.md の末尾に「振り分けの改善案」節を書き、完了報告
 - 判定表と実際の結果が食い違った（「易」と判定したのに再指示が要った／「難」と判定したが小さい変更で終わった）
 - Command Code 固有の停止（確認の画面・exit 45、冷間起動の失敗、合図の欠落など）
 
-**Sprint ごとにワーカーのモデルの割合（Command Code の目標 6〜8 割）を lead-return と台帳に数える**（8-2 の表と Sprint の締めに書く）。
+**Sprint ごとにワーカーのモデルの割合（目標は command-code.md 1-2b）を lead-return と台帳に数える**（8-2 の表と Sprint の締めに書く）。
 
 各項目には次の 3 つを書く:
 

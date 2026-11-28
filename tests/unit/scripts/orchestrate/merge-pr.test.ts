@@ -485,12 +485,16 @@ describe('main: merges once', () => {
     const kinds = (fake: ReturnType<typeof fakeGit>) =>
       fake.calls.some((c) => c.command === 'node' && c.args[0] === 'scripts/count-suppressions.mjs');
 
-    it('takes kind:refactor from the precheck of the published HEAD when the work HEAD has none', () => {
+    it('stops when the only precheck=ok is of a HEAD that is neither the work HEAD nor the published HEAD (#4617)', () => {
       recordWork();
       appendRecord(runDir, '3477', { issue: 3477, stage: 'precheck', result: 'ok', head: HEAD_B, note: REFACTOR });
       const fake = fakeGit({ prs: [openPr()], behind: true, checks: [GREEN] });
-      expect(runMain(fake).code).toBe(0);
-      expect(kinds(fake)).toBe(true);
+      const { code, err } = runMain(fake);
+      expect(code).toBe(1);
+      expect(err).toContain('no precheck=ok record to take the options from');
+      expect(kinds(fake)).toBe(false);
+      expect(fake.gitCalls('push')).toHaveLength(0);
+      expect(fake.ghCalls('pr merge')).toHaveLength(0);
     });
 
     it('keeps using the precheck of the work HEAD when there is one (negative control)', () => {
