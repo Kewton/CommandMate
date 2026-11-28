@@ -1,0 +1,32 @@
+{
+  "version": "0.57.0",
+  "date": "2026-11-28",
+  "highlight": {
+    "ja": "画面からの送信がより安全になり、宛先が替わったときや答えが想定と違うときに、確認なしに送らないようにしました。",
+    "en": "Sending from the screen is safer: messages are no longer sent without confirmation when the destination changes or the answer looks unexpected."
+  },
+  "added": [],
+  "improved": [],
+  "fixed": [
+    {
+      "ja": "画面の送信の答えが想定と違う形のとき、送れたと見なさず、届いたか分からないと知らせるようにしました。",
+      "en": "When the answer to a send from the screen has an unexpected shape, it is no longer treated as sent; you are told it is unknown whether it arrived."
+    },
+    {
+      "ja": "宛先が替わって戻した本文を、保存に失敗したときも確認なしに新しい宛先へ送らないようにしました。",
+      "en": "A message returned after its destination changed is no longer sent to the new destination without confirmation, even when saving fails."
+    },
+    {
+      "ja": "セッション一覧のタイルで、宛先が替わった後は一覧を読み直すまで古い宛先へ送らないようにしました。",
+      "en": "Session tiles no longer send to the old destination after it changed, until the list has been reloaded."
+    },
+    {
+      "ja": "Claude への ask で、書き終えた返答が返らず、重なりと誤って報告される問題を直しました。",
+      "en": "Fixed ask to Claude returning no reply and wrongly reporting an overlap after the answer was finished."
+    },
+    {
+      "ja": "Codex の許可の画面を、実行中と誤って表示する問題を直しました。",
+      "en": "Fixed a Codex permission prompt being shown as running."
+    }
+  ]
+}
