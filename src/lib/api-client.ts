@@ -26,6 +26,7 @@ import {
 // React tree — see the "External reachability reports" section there.
 import { reportServerReachability } from '@/hooks/useConnectivity';
 import { discardBody, hasWatchableBody, withBodyDeadline } from '@/lib/api-client-body-deadline';
+import { classifySendAnswer } from '@/lib/send-outcome/classify-send-answer';
 
 /**
  * Repository summary from API
@@ -552,41 +553,21 @@ export async function fetchApiResponse(
 }
 
 /**
- * Issue #4603 (design `send-outcome-4535.md` §2.2 D2–D4): whether a 2xx body of `POST /send` is the
- * answer the CLI reads as `sent` (S1 / S2) — the predicate of `isChatMessage` in
- * `src/lib/send-outcome/classify-send-answer.ts`: a non-empty string `id` and `role === 'user'`.
- */
-function isSentAnswer(body: unknown): boolean {
-  if (body === null || typeof body !== 'object' || Array.isArray(body)) return false;
-  const { id, role } = body as { id?: unknown; role?: unknown };
-  return typeof id === 'string' && id.length > 0 && role === 'user';
-}
-
-/**
- * Issue #4603 r3: whether the send's 2xx was served as JSON — the CLI's `isJsonType`
- * (`classify-send-answer.ts`): the media type (before `;`, trimmed, lower-cased) is
- * `application/json` or ends in `+json`. The send's own rule; every other caller keeps
- * {@link detectNonJsonBody}.
- */
-function isSendJsonType(contentType: string | null): boolean {
-  if (contentType === null) return false;
-  const mediaType = contentType.split(';', 1)[0]?.trim().toLowerCase() ?? '';
-  return mediaType === 'application/json' || mediaType.endsWith('+json');
-}
-
-/**
- * Issue #4603: the send's reading of a 2xx (after the auth-redirect guard and the non-2xx branch of
- * {@link fetchApi}, which it shares). A 2xx that is not the route's ChatMessage — a body that is
- * not JSON (D2), JSON that cannot be read (D3), or JSON of another shape (D4) — says nothing about
- * whether the text went in, so it is an `ApiError` carrying `sendOutcome: 'unknown'` (the screen's
- * `isSendOutcomeUnknown` reads it as the CLI reads the same answer), never a resolved send nor a
- * failure that may be retried directly. Used by {@link worktreeApi.sendMessage} only: every other
- * caller reads a 2xx as before.
+ * Issue #4603 / #4632: the send's reading of a 2xx (after the auth-redirect guard and the non-2xx
+ * branch of {@link fetchApi}, which it shares). The screen reads the answer with the CLI's own table
+ * (`classifySendAnswer`, design `send-outcome-4535.md` §2.2): `sent` only when the fact is `sent`
+ * and the row is `S1` or `S2` (a ChatMessage, with or without the relay's `sendOutcome: 'unknown'`).
+ * Every other 2xx — a body that is not JSON (D2), JSON that cannot be read (D3), JSON of another
+ * shape (D4), a ChatMessage whose `sendOutcome`/`ask.sendState` says otherwise, or an `ask`-only
+ * answer (S3, the human's D6) — says nothing about whether the text went in, so it is an `ApiError`
+ * carrying `sendOutcome: 'unknown'` (the screen's `isSendOutcomeUnknown` reads it as the CLI reads
+ * the same answer), never a resolved send nor a failure that may be retried directly. Used by
+ * {@link worktreeApi.sendMessage} only: every other caller reads a 2xx as before.
  */
 async function readSendAnswer<T>(response: Response): Promise<T> {
   const unknownAnswer = () =>
     new ApiError('Unexpected send answer', response.status, { sendOutcome: 'unknown' }, 'http');
-  if (!isSendJsonType(response.headers?.get('content-type') ?? null)) throw unknownAnswer();
+  const contentType = response.headers?.get('content-type') ?? null;
   let body: unknown;
   try {
     body = await response.json();
@@ -596,7 +577,13 @@ async function readSendAnswer<T>(response: Response): Promise<T> {
     if (error instanceof ApiError) throw error;
     throw unknownAnswer();
   }
-  if (!isSentAnswer(body)) throw unknownAnswer();
+  // The CLI's table wants the body as text. It is the body this response parsed to: an answer that
+  // did not parse never reaches here (it is unknown), and every row of the table classifies the
+  // same from the parsed value. (`response.text()` would also read it, but the existing #4603 stubs
+  // — e.g. `api-client-send-timeout-3194` — hand a `Response` with `json()` only.)
+  const bodyText = JSON.stringify(body) ?? '';
+  const classified = classifySendAnswer({ kind: 'response', status: response.status, contentType, bodyText });
+  if (classified.fact !== 'sent' || (classified.row !== 'S1' && classified.row !== 'S2')) throw unknownAnswer();
   return body as T;
 }
 

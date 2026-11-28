@@ -134,7 +134,7 @@ beforeEach(() => {
       await hold('kill');
       return reply(200, { success: true, message: 'ok' });
     }
-    if (rest === '/send') return reply(201, { id: 'm1' });
+    if (rest === '/send') return reply(201, { id: 'm1', role: 'user' });
     if (rest === '/mem/handoff/requests' && method === 'POST') {
       await hold('create');
       if (createAnswer === 'session_unknown') return reply(409, { ok: false, code: 'session_unknown' });

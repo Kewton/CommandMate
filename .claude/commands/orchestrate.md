@@ -167,7 +167,7 @@ PR の前に `node scripts/count-suppressions.mjs --base origin/develop` を走�
 
 各 Issue の本文（1-1 で取得済み）から難易度を判定し、開発担当を決める。
 **優先順位**: `--claude-only` ＞ `--assign <N>=<agent>` ＞ 下の判定表。
-**目標: 仕事の 6〜8 割を Command Code で回す**（Sprint ごとにワーカーのモデルの割合を lead-return と台帳に数える）。
+**割合（6〜8 割は道具の後）・回す条件・実験の枠**: docs/orchestrate/command-code.md 1-2b（lead-return と台帳に数える）。
 
 **Claude に回す（1 つでも当てはまれば「難」）**
 
@@ -1280,7 +1280,7 @@ summary.md の末尾に「振り分けの改善案」節を書き、完了報告
 - 判定表と実際の結果が食い違った（「易」と判定したのに再指示が要った／「難」と判定したが小さい変更で終わった）
 - Command Code 固有の停止（確認の画面・exit 45、冷間起動の失敗、合図の欠落など）
 
-**Sprint ごとにワーカーのモデルの割合（Command Code の目標 6〜8 割）を lead-return と台帳に数える**（8-2 の表と Sprint の締めに書く）。
+**Sprint ごとにワーカーのモデルの割合（目標は command-code.md 1-2b）を lead-return と台帳に数える**（8-2 の表と Sprint の締めに書く）。
 
 各項目には次の 3 つを書く:
 
