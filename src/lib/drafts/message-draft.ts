@@ -36,7 +36,12 @@ export function getInstanceDraftKey(worktreeId: string, instanceId: string): str
   return `${DRAFT_STORAGE_KEY_PREFIX}${worktreeId}:instance:${instanceId}`;
 }
 
-type DraftAppendListener = (text: string) => void;
+/**
+ * Issue #4604 S13 (記憶は値から): a listener hears the text and the marks the draft's value holds after the
+ * write (`marks`: the value written, or what stayed when it could not be — with this page's mark), so the
+ * composer showing the draft holds them as it holds the text.
+ */
+type DraftAppendListener = (text: string, marks?: RetargetStoreRead) => void;
 const draftAppendListeners = new Map<string, Set<DraftAppendListener>>();
 
 /**
@@ -68,9 +73,11 @@ export function subscribeDraftAppend(key: string, listener: DraftAppendListener)
  */
 export function appendToStoredDraft(key: string, text: string): void {
   if (!text) return;
-  // Issue #4604 S13: one write of the draft's value (its marks stay with it).
+  // Issue #4604 S13: one write of the draft's value (its marks stay with it). The composers hear what the
+  // value holds after it (a value over one that could not be read is "unknown" of a new generation).
   writeRetarget(key, { kind: 'append', text, tags: [] });
-  draftAppendListeners.get(key)?.forEach((listener) => listener(text));
+  const marks = heldMarksOf(key, readRetargetStore(key));
+  draftAppendListeners.get(key)?.forEach((listener) => listener(text, marks));
 }
 
 /** Issue #4419: text added to a draft — the whole draft when it is empty, else after a blank line. */
@@ -206,7 +213,7 @@ export function releaseRetargetTags(draftKey: string, ids: readonly string[], se
  * ---------------------------------------------------------------------------------------------
  */
 
-/** Issue #4604: what `<draftKey>:retarget` holds, as the one road reads it. */
+/** Issue #4604: what a draft's marks are, as the one road reads them (S13: the marks part of its one value). */
 export type RetargetStoreRead =
   | { kind: 'absent' }
   | { kind: 'list'; tags: RetargetTag[] }
@@ -305,13 +312,26 @@ export interface RetargetEnv {
   /**
    * Issue #4604 S13: filled by {@link writeRetarget} — `written`: the value now holds what was asked (its
    * text included; the short value counts, a write that threw and left the value as it was does not).
+   * `marks`: the marks the draft's value holds after the call — the value written, or what stayed (and this
+   * page's mark, as an "unknown") — what the composer that wrote holds from it (記憶は値から, S13).
    */
-  outcome?: { written: boolean };
+  outcome?: { written: boolean; marks?: RetargetStoreRead };
 }
 
 /** Issue #4604: this page's unstorable mark for `draftKey` (its generation), if any. */
 export function readRetargetUnstorable(draftKey: string, env: RetargetEnv = {}): string | null {
   return (env.unstorable ?? unstorableRetarget).get(draftKey) ?? null;
+}
+
+/**
+ * Issue #4604 S13 (記憶は値から): the marks a composer holds from `read` — the marks of `draftKey`'s value —
+ * with this page's mark: while the value does not say "unknown" itself, this page's mark is held as its
+ * "unknown" (the value could not take it).
+ */
+export function heldMarksOf(draftKey: string, read: RetargetStoreRead, env: RetargetEnv = {}): RetargetStoreRead {
+  if (read.kind === 'unknown') return read;
+  const page = readRetargetUnstorable(draftKey, env);
+  return page === null ? read : { kind: 'unknown', generation: page, tags: tagsOf(read) };
 }
 
 /** Issue #4604: read a draft's marks in their five shapes (S13: the marks part of its one value). */
@@ -463,9 +483,15 @@ export function readSendUnknownMark(draftKey: string): SendUnknownMark | null {
   return readDraft(draftKey).sendMark;
 }
 
-/** Issue #4503: set (or let go, null) a draft's send-unknown mark — one write of its value. */
-export function writeSendUnknownMark(draftKey: string, mark: SendUnknownMark | null): void {
-  writeRetarget(draftKey, { kind: 'sendMark', mark });
+/**
+ * Issue #4503: set (or let go, null) a draft's send-unknown mark — one write of its value. Issue #4604 S13:
+ * returns the marks the value holds after it (a mark written over a value that could not be read makes it
+ * "unknown" of a new generation — the composer holds it: 記憶は値から).
+ */
+export function writeSendUnknownMark(draftKey: string, mark: SendUnknownMark | null): RetargetStoreRead {
+  const outcome: NonNullable<RetargetEnv['outcome']> = { written: false };
+  writeRetarget(draftKey, { kind: 'sendMark', mark }, { outcome });
+  return outcome.marks ?? heldMarksOf(draftKey, readRetargetStore(draftKey));
 }
 
 /**
@@ -493,7 +519,7 @@ export function parseRetargetStore(raw: string | null): RetargetStoreRead {
 const tagsOf = (read: RetargetStoreRead): RetargetTag[] => (read.kind === 'list' || read.kind === 'unknown' ? read.tags : []);
 
 /**
- * Issue #4604 (設計書 §3.4.1, the table): the next value of `<draftKey>:retarget` — a pure function.
+ * Issue #4604 (設計書 §3.4.1, the table): the next marks of a draft (S13: the marks part of its one value) — a pure function.
  * `unstorable` is this page's mark for the key (its generation); `newGeneration` makes one when the
  * table says "a new generation" (called only then, in the table's order).
  *
@@ -592,23 +618,33 @@ function marksPart(next: RetargetStoreValue): Pick<DraftValue, 'tags' | 'unknown
  * Issue #4604 (設計書 §3.4.1): the one road to a draft's store — nothing else calls `setItem` or
  * `removeItem` on it. Issue #4604 S13: the store is one value (`<draftKey>:value`), so every op is one
  * write: (1) read the value once, (2) the next value — its marks by {@link nextRetarget}, its text and its
- * #4503 mark by the op — (3) write it (an empty value removes the key; the same value writes nothing),
- * (4) if that throws and the marks were to change, the short value (the text and the #4503 mark kept, no
- * tag, "unknown": the store's generation when it says "unknown" already — #4616 —, else a new one), (5) if
- * that throws too, this page's mark (a new generation): `'unstored'` — another tab, or this page after a
- * reload, cannot know. A release or a move's `from` side does not take steps 4・5 (letting go never adds an
- * "ask"). What could not be read is never written over as known: it becomes "unknown".
+ * #4503 mark by the op — (3) write it (an empty value removes the key; a value equal to the stored one is
+ * not written again unless the marks' table asks for a write — §3.4.1), (4) if that throws and the marks
+ * were to change, the short value (the text and the #4503 mark kept, no tag, "unknown" of a new generation
+ * — #4616 受入 1, reusing the store's generation, is not in: see changelog.d/4616.md), (5) if that throws
+ * too, this page's mark (a new generation): `'unstored'` — another tab, or this page after a reload, cannot
+ * know. A release or a move's `from` side does not take steps 4・5 (letting go never adds an "ask"). What
+ * could not be read is never written over as known: it becomes "unknown".
  * While no value is stored, the keys of before are read and folded in: the value goes in first, then they
- * go (the migration — the one exception to one write; a remove that throws leaves them, the value is read).
- * `env.outcome.written` says whether the value now holds what was asked (the text included).
+ * go (the migration — the one exception to one write; a remove that throws leaves them, the value is read;
+ * the text key goes first, and the marks' keys only once it went — c P2-3). A send or a move's `from` side
+ * whose value (the marks left, no text) does not fit lets the text of before go alone: its marks stay under
+ * their keys of before (no text is left without them, and the sent text does not come back — c P2-2).
+ * `env.outcome.written` says whether the value now holds what was asked (the text included);
+ * `env.outcome.marks` what its marks are after the call (the composer that wrote holds them: 記憶は値から).
  */
 export function writeRetarget(draftKey: string, op: DraftOp, env: RetargetEnv = {}): RetargetWriteResult {
   const unstorable = env.unstorable ?? unstorableRetarget;
   const newGeneration = env.newGeneration ?? newRetargetGeneration;
   const storage = storageOf(env);
-  const outcome = env.outcome ?? { written: false };
+  const outcome: NonNullable<RetargetEnv['outcome']> = env.outcome ?? { written: false };
   outcome.written = false;
   const prev = readDraft(draftKey, { storage });
+  /** The marks after the call (`read`: what the value holds), with this page's mark. */
+  const after = (read: RetargetStoreRead): void => {
+    outcome.marks = heldMarksOf(draftKey, read, { unstorable });
+  };
+  after(prev.marks);
   const valueKey = getDraftValueKey(draftKey);
   const marksOp = marksOpOf(op);
   const transition = marksOp === null ? null : nextRetarget(prev.marks, marksOp, unstorable.get(draftKey) ?? null, newGeneration);
@@ -645,7 +681,7 @@ export function writeRetarget(draftKey: string, op: DraftOp, env: RetargetEnv = 
    * The migration: the keys of before go once the value holds what they held (`strict`: they are the
    * write itself — the value is empty and none is stored —, so one that cannot go is a write that failed).
    */
-  const foldLegacy = (strict: boolean) => {
+  const foldLegacy = (strict: boolean, textOnly = false) => {
     const keep = (error: unknown) => {
       if (strict) throw error;
     };
@@ -654,8 +690,11 @@ export function writeRetarget(draftKey: string, op: DraftOp, env: RetargetEnv = 
         storage.removeItem(draftKey);
       } catch (error) {
         keep(error);
+        // c P2-3: the text of before stays — so do its marks (a text is never left without them).
+        return;
       }
     }
+    if (textOnly) return;
     if (prev.legacy.includes(getRetargetTagKey(draftKey))) {
       try {
         storage.removeItem(getRetargetTagKey(draftKey));
@@ -676,6 +715,7 @@ export function writeRetarget(draftKey: string, op: DraftOp, env: RetargetEnv = 
     // Nothing changes: nothing is written.
     if (transition?.clearUnstorable) unstorable.delete(draftKey);
     outcome.written = true;
+    after(prev.marks);
     return unreadable || prev.marks.kind === 'unknown' || unstorable.has(draftKey) ? 'unknown-stored' : 'stored';
   }
   if (!prev.textKnown && !(op.kind === 'save' && op.seen === true && op.text !== null)) {
@@ -684,6 +724,7 @@ export function writeRetarget(draftKey: string, op: DraftOp, env: RetargetEnv = 
     // more). An "ask" the op was to add stays on this page (step 5).
     if (marksWrite && transition !== null && transition.failClosed) {
       if (env.markPage !== false) unstorable.set(draftKey, newGeneration());
+      after(prev.marks);
       return 'unstored';
     }
     return 'unknown-stored';
@@ -698,8 +739,18 @@ export function writeRetarget(draftKey: string, op: DraftOp, env: RetargetEnv = 
     }
     if (transition?.clearUnstorable) unstorable.delete(draftKey);
     outcome.written = true;
+    after(marksOfValue(next));
     return told();
   } catch {
+    if (!prev.value && text === '' && prev.text !== '') {
+      // c P2-2: a send (or a move's `from` side) over the keys of before whose value does not fit — the text
+      // of before goes alone; its marks stay under their keys (no text left without them, none sent again).
+      try {
+        foldLegacy(true, true);
+      } catch {
+        /* it stays: the text and its marks of before, as they were */
+      }
+    }
     // A text (or #4503 mark) that does not fit: the value stays as it was, its marks with it.
     if (!marksWrite && !marksChange) return unreadable || prev.marks.kind === 'unknown' || unstorable.has(draftKey) ? 'unknown-stored' : 'stored';
     if (transition !== null && transition.next !== null && !transition.failClosed) return 'unstored';
@@ -709,10 +760,12 @@ export function writeRetarget(draftKey: string, op: DraftOp, env: RetargetEnv = 
     storage.setItem(valueKey, encodeDraftValue({ text, tags: [], unknown: generation, sendMark }));
     foldLegacy(false);
     outcome.written = true;
+    after({ kind: 'unknown', generation, tags: [] });
     env.onShortUnknown?.();
     return 'unknown-stored';
   } catch {
     if (env.markPage !== false) unstorable.set(draftKey, newGeneration());
+    after(prev.marks);
     return 'unstored';
   }
 }
@@ -785,7 +838,10 @@ export type MoveDraftResult = 'moved' | 'nothing' | 'failed';
  * `to` hear it; then `from`'s text goes (`moveOut`: its marks stay). Nothing moves when `to` cannot take
  * it (§1.10 決め 4: `from` is let go only once `to` holds it).
  * r3 (P1-6): `'failed'` when there was a text and it could not be moved (it stays under `from`) — the
- * caller says so; `'nothing'` when there was no text to move.
+ * caller says so; `'nothing'` when there was no text to move. S13 (c P2-2): `'failed'` too when `from`'s
+ * text could not go once `to` held it (the text is under both: it was not moved).
+ * S13 (記憶は値から, c P1-1): the composers showing `to` hear the text with the marks `to`'s value holds
+ * after the write, and hold them.
  */
 export function moveDraft(from: string, to: string): MoveDraftResult {
   if (from === to) return 'nothing';
@@ -795,12 +851,14 @@ export function moveDraft(from: string, to: string): MoveDraftResult {
   if (!source.textKnown) return 'failed';
   const text = source.text;
   if (text.trim() === '') return 'nothing';
-  const outcome = { written: false };
+  const outcome: NonNullable<RetargetEnv['outcome']> = { written: false };
   writeRetarget(to, { kind: 'moveIn', from: source.marks, fromUnstorable: readRetargetUnstorable(from), text }, { outcome });
   if (!outcome.written) return 'failed';
-  draftAppendListeners.get(to)?.forEach((listener) => listener(text));
+  const marks = outcome.marks;
+  draftAppendListeners.get(to)?.forEach((listener) => listener(text, marks));
   writeRetarget(from, { kind: 'moveOut' });
-  return 'moved';
+  const left = readDraft(from);
+  return left.textKnown && left.text.trim() === '' ? 'moved' : 'failed';
 }
 
 /**
@@ -808,7 +866,12 @@ export function moveDraft(from: string, to: string): MoveDraftResult {
  * tag went into the store only as the short "unknown" (the one that takes it says so with
  * `retargetPartiallyStored`, so two composers of the draft do not both say it).
  */
-type RetargetedTextListener = (returned: RetargetedText, info: { takeShortUnknown: () => boolean }) => void;
+type RetargetedTextListener = (
+  returned: RetargetedText,
+  info: { takeShortUnknown: () => boolean },
+  /** Issue #4604 S13 (記憶は値から): the marks the draft's value holds after the write. */
+  marks?: RetargetStoreRead,
+) => void;
 const retargetedTextListeners = new Map<string, Set<RetargetedTextListener>>();
 
 /**
@@ -849,10 +912,11 @@ export function returnRetargetedText(draftKey: string, returned: RetargetedText)
   const onShortUnknown = () => {
     shortUnknown = true;
   };
-  const outcome = { written: false };
+  const outcome: NonNullable<RetargetEnv['outcome']> = { written: false };
   if (writeRetarget(draftKey, { kind: 'append', text, tags: [tag] }, { markPage: false, onShortUnknown, outcome }) === 'unstored' || !outcome.written) {
     return false;
   }
+  const marks = outcome.marks;
   const listeners = retargetedTextListeners.get(draftKey);
   const info = {
     takeShortUnknown: () => {
@@ -861,6 +925,6 @@ export function returnRetargetedText(draftKey: string, returned: RetargetedText)
       return told;
     },
   };
-  listeners?.forEach((listener) => listener({ text, tag }, info));
+  listeners?.forEach((listener) => listener({ text, tag }, info, marks));
   return true;
 }

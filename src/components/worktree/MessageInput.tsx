@@ -56,9 +56,11 @@ import {
   getDraftValueKey,
   getInstanceDraftKey,
   getSplitDraftKey,
+  heldMarksOf,
   subscribeDraftAppend,
   decideRetarget,
   mergeRetargetTags,
+  newRetargetGeneration,
   newRetargetTag,
   parseDraftValueMarks,
   readDraft,
@@ -71,6 +73,7 @@ import {
   writeSendUnknownMark,
   type DraftOp,
   type DraftScope,
+  type RetargetStoreRead,
   type RetargetTag,
   type RetargetTarget,
   type RetargetWriteResult,
@@ -360,7 +363,10 @@ function composerHeightPercent(height: number | null, maxHeight: number | null |
  * `${...}:0` draft is empty, copy the value over and delete the legacy entry.
  * Safe to call repeatedly (no-op when legacy key absent).
  * Issue #4604 S13: the `:0` draft is its one value (or its keys of before, read while none is stored) —
- * the copy is one write of that value, through the road.
+ * the copy is one write of that value, through the road. The legacy key goes only once the copy went in
+ * (review a P1-1・c P1-2: a full store keeps it), or when `:0` holds a text already; a `:0` that cannot be
+ * read, or holds what cannot be read, is not written over and the legacy key stays. A `:0` holding marks
+ * and no text takes the text with its marks kept.
  */
 function migrateLegacyDraftKey(worktreeId: string): void {
   try {
@@ -369,8 +375,11 @@ function migrateLegacyDraftKey(worktreeId: string): void {
     if (legacyValue === null) return;
     const newKey = getSplitDraftKey(worktreeId, 0);
     const current = readDraft(newKey);
-    if (current.textKnown && current.text === '' && !current.value && current.legacy.length === 0) {
-      writeRetarget(newKey, { kind: 'save', text: legacyValue, tags: [], unknown: null });
+    if (!current.textKnown || current.marks.kind === 'junk') return;
+    if (current.text === '') {
+      const outcome = { written: false };
+      writeRetarget(newKey, { kind: 'save', text: legacyValue, tags: [], unknown: null }, { outcome });
+      if (!outcome.written) return;
     }
     window.localStorage.removeItem(legacyKey);
   } catch {
@@ -387,6 +396,16 @@ function migrateLegacyDraftKey(worktreeId: string): void {
 interface HeldRetargetTags {
   key: string;
   tags: RetargetTag[];
+}
+
+/**
+ * Issue #4604 S13: what a composer's own write through the road got back — what the road said, whether the
+ * value now holds what was asked, and the marks the value holds after it (記憶は値から).
+ */
+interface OwnDraftWrite {
+  result: RetargetWriteResult;
+  written: boolean;
+  marks: RetargetStoreRead | undefined;
 }
 
 export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, isSessionStarting = false, pendingInsertText, onInsertConsumed, splitIndex = 0, draftScope = 'split', onFocus, isProcessing = false, showToast, autoYesSlot, agentModeSlot, directInputSlot, onOptimisticSend, heightScope, maxHeight, planReviewActive = false, onSendTargetChanged, sendBlockedReason = null, isSendHeld, onPreviousDraftSaved }: MessageInputProps) {
@@ -449,17 +468,19 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   notifyRetargetWriteRef.current = notifyRetargetWrite;
   /**
    * Issue #4604 accept r1 (F2): a write through the one road, told as {@link notifyRetargetWrite} says.
-   * S13: `written` — the draft's value now holds what was asked (its text included).
+   * S13: `written` — the draft's value now holds what was asked (its text included); `marks` — what the
+   * value's marks are after it (the value written, or what stayed, with this page's mark): the composer
+   * holds them (記憶は値から).
    */
-  const writeRetargetTold = useCallback((key: string, op: DraftOp): { result: RetargetWriteResult; written: boolean } => {
+  const writeRetargetTold = useCallback((key: string, op: DraftOp): OwnDraftWrite => {
     let shortUnknown = false;
     const onShortUnknown = () => {
       shortUnknown = true;
     };
-    const outcome = { written: false };
+    const outcome: { written: boolean; marks?: RetargetStoreRead } = { written: false };
     const result = writeRetarget(key, op, { onShortUnknown, outcome });
     notifyRetargetWrite(result, shortUnknown);
-    return { result, written: outcome.written };
+    return { result, written: outcome.written, marks: outcome.marks };
   }, [notifyRetargetWrite]);
 
   // Hooks for slash command functionality
@@ -598,11 +619,11 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   const retargetConfirmedRef = useRef<string | null>(null);
   const retargetUnreadableYesRef = useRef<RetargetUnknownYes | null>(null);
   // Issue #4535 r7 (INV-V2a〜V2c, 設計書 §3.4.1): the tags of the texts the fence handed back into this
-  // composer's draft (`key`). Held here — the state is what decides — and next to the draft
-  // (`<draftKey>:retarget`), so they move with it (a reload, the tile's instance switch). Only this
-  // composer's own send lets them go; another composer, another tab, time or count never does.
-  // Issue #4604 accept r1c (案 i): each tag's origin — received here, or taken in (`adopted`) from another
-  // tab's write; only the received ones are this composer's to let go (its send) and to write back.
+  // composer's draft (`key`). Held here — the state is what decides — and in the draft's value (Issue #4604
+  // S13: `<draftKey>:value`, with its text), so they move with it (a reload, the tile's instance switch).
+  // Only this composer's own send lets them go; another composer, another tab, time or count never does.
+  // S13 (記憶は値から): what this composer holds is made from the value written or read for its draft —
+  // its own writes, the page's notices (追記・戻し・移動), `storage`, its reads — by `holdMarks`.
   const retargetTagsRef = useRef<HeldRetargetTags>({ key: '', tags: [] });
   // Issue #4604 r3 (P1-2, the extension of `retargetTagsRef` the PM allowed): the "unknown" generation
   // this composer restored its draft's text under — held as its tags are, so another tab's send that let
@@ -624,6 +645,29 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     const held = retargetUnknownRef.current;
     return held !== null && held.key === key ? held.generation : null;
   }, []);
+  /**
+   * Issue #4604 S13 (記憶は値から, s13/enabler-4604-memory-copy.md §4): this composer holds the marks of the
+   * value written or read for its draft `key` (shown now) — the one rule of its four entries: its own write
+   * (the value it wrote, or what stayed, or this page's mark), the page's notices (追記・戻し・移動: the value
+   * the write left), `storage` (the value the event carries) and its reads (the restore, the read again of
+   * `textToSave`). Its tags join the held ones; an "unknown" is held as its generation — and what cannot be
+   * read (junk, a read that throws) is held as an "unknown" of this composer's own generation, which its next
+   * save writes with its text — unless it already holds one, or its own asked send let that one go (#4616).
+   * Nothing here lets a held mark go (only this composer's own send does). A composer whose restore could not
+   * read the draft shows none of it: it holds what the read that recovers it reads.
+   */
+  const holdMarks = useCallback((key: string, marks: RetargetStoreRead | undefined): void => {
+    if (marks === undefined || draftKeyRef.current !== key) return;
+    const tags = marks.kind === 'list' || marks.kind === 'unknown' ? marks.tags : [];
+    const held = retargetTagsRef.current;
+    if (tags.length > 0 && held.key === key) retargetTagsRef.current = { key, tags: mergeRetargetTags(held.tags, tags) };
+    const unreadable = marks.kind === 'junk' || marks.kind === 'throws';
+    if (marks.kind !== 'unknown' && !(unreadable && unreadableKeyRef.current !== key)) return;
+    if (heldUnknownOf(key) !== null) return;
+    const generation = marks.kind === 'unknown' ? marks.generation : newRetargetGeneration();
+    if (releasedUnknownRef.current.get(key)?.has(generation) ?? false) return;
+    retargetUnknownRef.current = { key, generation };
+  }, [heldUnknownOf]);
   // Issue #4535 r5 (review H1・P3-6): why the fence answered `unknown` on the awaited road — shown
   // with the unknown notice of that draft.
   const [unknownReason, setUnknownReason] = useState<{ key: string; text: string; reason: string } | null>(null);
@@ -758,10 +802,11 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
    * lets a tag go.
    * Issue #4604 (N-7・N-11): with the generations its question saw (`seen`). S13: one write of the draft's
    * value — its text, its #4503 mark and those marks go together; this composer's state lets them go only
-   * once that write went in (a write that throws leaves the text and its marks stored).
+   * once that write went in (a write that throws leaves the text and its marks stored). What the value still
+   * says "unknown" for (a generation born after its question, N-7) is held (記憶は値から).
    */
   const releaseSentTags = useCallback((key: string, ids: readonly string[], seen: readonly string[] | null): boolean => {
-    const outcome = { written: false };
+    const outcome: { written: boolean; marks?: RetargetStoreRead } = { written: false };
     writeRetarget(key, { kind: 'sent', ids, seen }, { outcome });
     if (!outcome.written) return false;
     storedTextRef.current = { key, text: '' };
@@ -780,24 +825,30 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       const gone = new Set(ids);
       retargetTagsRef.current = { key, tags: held.tags.filter((tag) => !gone.has(tag.id)) };
     }
+    // The sent text is gone: of the value left, only its "unknown" (the tags of another composer stay its).
+    const left = outcome.marks;
+    if (left?.kind === 'unknown') holdMarks(key, { kind: 'unknown', generation: left.generation, tags: [] });
     return true;
-  }, []);
+  }, [holdMarks]);
   /** Issue #4535 r7: a tag for this composer's draft `key` — kept in its state (if shown) and stored. */
   const keepRetargetTag = useCallback((key: string, tag: RetargetTag) => {
     const held = retargetTagsRef.current;
     if (held.key === key) retargetTagsRef.current = { key, tags: mergeRetargetTags(held.tags, [tag]) };
-    // Issue #4604 (a P2-2・V2-A): through the one road — what cannot be kept as a list is kept "unknown".
-    writeRetargetTold(key, { kind: 'add', tags: [tag] });
-  }, [writeRetargetTold]);
+    // Issue #4604 (a P2-2・V2-A): through the one road — what cannot be kept as a list is kept "unknown"
+    // (S13: and held here — 記憶は値から).
+    holdMarks(key, writeRetargetTold(key, { kind: 'add', tags: [tag] }).marks);
+  }, [writeRetargetTold, holdMarks]);
   /**
    * Issue #4604 S13 (INV-S1 → one value): this composer writes its draft `key` — its text (null: the stored
    * text stays) with the marks it holds for that draft (its tags and its held "unknown"), in one write, so
    * the store never holds its text without them. The road merges them with the marks stored (another tab's
    * stay) and writes nothing when the value holds all of it already. Returns whether the value holds it.
+   * S13 (記憶は値から): the marks the value holds after it are held (a write over what could not be read, or
+   * the short value, makes an "unknown" this composer would not know otherwise — R2).
    */
   const saveHeldDraft = useCallback((key: string, text: string | null): boolean => {
     const held = retargetTagsRef.current;
-    const { written } = writeRetargetTold(key, {
+    const { written, marks } = writeRetargetTold(key, {
       kind: 'save',
       text,
       tags: held.key === key ? held.tags : [],
@@ -805,8 +856,9 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       seen: unreadableKeyRef.current !== key,
     });
     if (written && text !== null) storedTextRef.current = { key, text };
+    holdMarks(key, marks);
     return written;
-  }, [writeRetargetTold, heldUnknownOf]);
+  }, [writeRetargetTold, heldUnknownOf, holdMarks]);
   /**
    * Issue #4604 S13 (本文を黙って消さない): the text to save under `key`. When this composer's restore of
    * `key` could not read the store, the store is read again first: once it reads, what it holds comes
@@ -818,14 +870,12 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     const now = readDraft(key);
     if (!now.textKnown) return { text: message, recovered: false };
     unreadableKeyRef.current = null;
-    const held = retargetTagsRef.current;
-    const tags = now.marks.kind === 'list' || now.marks.kind === 'unknown' ? now.marks.tags : [];
-    if (held.key === key) retargetTagsRef.current = { key, tags: mergeRetargetTags(held.tags, tags) };
-    if (now.marks.kind === 'unknown') retargetUnknownRef.current = { key, generation: now.marks.generation };
+    // 記憶は値から: what it holds now is held (what cannot be read as an "unknown").
+    holdMarks(key, heldMarksOf(key, now.marks));
     storedTextRef.current = { key, text: now.text };
     const text = now.text.trim() === '' ? message : message.trim() === '' ? now.text : appendDraftText(now.text, message);
     return { text, recovered: true };
-  }, []);
+  }, [holdMarks]);
   /**
    * Issue #4535 r5 (review H1, 段 2 §3.2), r7 (INV-V2a): the awaited road's answer from the send fence.
    * The text stays in the draft (it never left it); for `not_sent` with its original target named
@@ -848,13 +898,18 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   }, [t, keepRetargetTag, onSendTargetChanged]);
   const markSendUnknown = useCallback((key: string, text: string, target: string) => {
     const mark = { text, target };
-    writeSendUnknownMark(key, mark);
+    // Issue #4604 S13 (記憶は値から): a mark written over a value that could not be read makes it "unknown" of
+    // a new generation — held here, as the value says (this composer shows the text).
+    const marks = writeSendUnknownMark(key, mark);
+    if (marks.kind === 'unknown' && draftKeyRef.current === key && heldUnknownOf(key) === null) {
+      retargetUnknownRef.current = { key, generation: marks.generation };
+    }
     setUnknownReason(null);
     if (draftKeyRef.current === key) setUnknownMark(mark);
     setError(null);
     setConfirmingResend(false);
     setResendConfirmedBoth(false);
-  }, [setResendConfirmedBoth]);
+  }, [setResendConfirmedBoth, heldUnknownOf]);
   useEffect(() => {
     planReviewActiveRef.current = !!planReviewActive;
   }, [planReviewActive]);
@@ -929,10 +984,11 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     if (draftScope === 'split' && splitIndex === 0) {
       migrateLegacyDraftKey(worktreeId);
     }
-    // Issue #4604 S13: one read of the draft's value. While none is stored, the keys of before are read
-    // and folded into it once (the migration: I1's one exception).
+    // Issue #4604 S13: while no value is stored, the keys of before are folded into it once (the migration:
+    // I1's one exception; a value already stored writes nothing); then one read of the draft's value — what
+    // the migration wrote (記憶は値から: the "unknown" it made of marks that could not be read is held, c P2-4).
+    writeRetarget(draftKey, { kind: 'restore' });
     const stored = readDraft(draftKey);
-    if (stored.legacy.length > 0) writeRetarget(draftKey, { kind: 'restore' });
     const unreadable = !stored.textKnown;
     const saved = stored.text;
     storedTextRef.current = { key: draftKey, text: saved };
@@ -953,13 +1009,20 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       heldTags.key === draftKey
         ? { key: draftKey, tags: mergeRetargetTags(heldTags.tags, restoredTags) }
         : { key: draftKey, tags: restoredTags };
+    // 記憶は値から (R3): marks that cannot be read (junk, a read that throws while the text reads) are held as
+    // an "unknown" of this composer's own generation (its next save writes it with the text).
     const heldUnknown = retargetUnknownRef.current;
+    const page = readRetargetUnstorable(draftKey);
     retargetUnknownRef.current =
       stored.marks.kind === 'unknown'
         ? { key: draftKey, generation: stored.marks.generation }
         : heldUnknown !== null && heldUnknown.key === draftKey
           ? heldUnknown
-          : null;
+          : page !== null
+            ? { key: draftKey, generation: page }
+            : !unreadable && (stored.marks.kind === 'junk' || stored.marks.kind === 'throws')
+              ? { key: draftKey, generation: newRetargetGeneration() }
+              : null;
     // Issue #4503: the draft's mark comes back with it (a question or a confirmation does not).
     setUnknownMark(stored.sendMark);
     setConfirmingResend(false);
@@ -980,7 +1043,9 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // restore effect) — which, still holding the text before the append, would erase it.
   useEffect(
     () =>
-      subscribeDraftAppend(draftKey, (text) => {
+      subscribeDraftAppend(draftKey, (text, marks) => {
+        // Issue #4604 S13 (記憶は値から, c P1-1): the marks the value holds after the append or the move.
+        holdMarks(draftKey, marks);
         const pendingSave = pendingDraftSaveRef.current;
         if (pendingSave && pendingSave.key === draftKey) {
           pendingDraftSaveRef.current = { key: draftKey, message: appendDraftText(pendingSave.message, text) };
@@ -988,7 +1053,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         // Issue #4604: into this key's text only (a text of another key is not touched).
         setDraft((prev) => (prev.key === draftKey ? { key: draftKey, text: appendDraftText(prev.text, text) } : prev));
       }),
-    [draftKey],
+    [draftKey, holdMarks],
   );
 
   // Issue #4535 r7 (INV-V2a): a text the send fence handed back into this draft, with its tag — both
@@ -996,11 +1061,13 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // already has both (`returnRetargetedText`).
   useEffect(
     () =>
-      subscribeRetargetedText(draftKey, ({ text, tag }, info) => {
+      subscribeRetargetedText(draftKey, ({ text, tag }, info, marks) => {
         // Issue #4604 accept r1 (F2): its tag went in only as the short "unknown" — said once.
         if (info.takeShortUnknown()) notifyRetargetWriteRef.current('unknown-stored', true);
         const held = retargetTagsRef.current;
         if (held.key === draftKey) retargetTagsRef.current = { key: draftKey, tags: mergeRetargetTags(held.tags, [tag]) };
+        // Issue #4604 S13 (記憶は値から): and the marks the value holds after it (the short value's "unknown").
+        holdMarks(draftKey, marks);
         const pendingSave = pendingDraftSaveRef.current;
         if (pendingSave && pendingSave.key === draftKey) {
           pendingDraftSaveRef.current = { key: draftKey, message: appendDraftText(pendingSave.message, text) };
@@ -1008,7 +1075,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         // Issue #4604: into this key's text only (a text of another key is not touched).
         setDraft((prev) => (prev.key === draftKey ? { key: draftKey, text: appendDraftText(prev.text, text) } : prev));
       }),
-    [draftKey],
+    [draftKey, holdMarks],
   );
 
   // Issue #4604 accept r1c (F1): another tab wrote this draft's value — the marks it carries are taken in
@@ -1025,18 +1092,12 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       if ((incoming.kind === 'list' || incoming.kind === 'unknown') && before.key === draftKey) {
         retargetTagsRef.current = { key: draftKey, tags: mergeRetargetTags(before.tags, incoming.tags) };
       }
-      const unknownBefore = retargetUnknownRef.current;
-      if (
-        incoming.kind === 'unknown' &&
-        (unknownBefore === null || unknownBefore.key !== draftKey) &&
-        !(releasedUnknownRef.current.get(draftKey)?.has(incoming.generation) ?? false)
-      ) {
-        retargetUnknownRef.current = { key: draftKey, generation: incoming.generation };
-      }
+      // Its "unknown": held unless one is held, or this composer's own asked send let it go (#4616).
+      if (incoming.kind === 'unknown') holdMarks(draftKey, { kind: 'unknown', generation: incoming.generation, tags: [] });
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
-  }, [draftKey]);
+  }, [draftKey, holdMarks]);
 
   // Debounced save of draft message to localStorage (per-split key, Issue #728; per-instance key
   // for the tile, Issue #4419)

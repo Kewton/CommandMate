@@ -210,7 +210,10 @@ function draftOfKey(key: string): { draft: string; value: boolean } | null {
 }
 
 /**
- * An in-memory store with the model's failures: `rThrow` — reading `:retarget` throws; `wAll` —
+ * An in-memory store with the model's failures: `rThrow` — reading `:retarget` throws (S13: a `<K>:value`
+ * with no text of its own reads as junk, not as a throw — so the road's "the draft could not be read" branch
+ * is not reached from here; review b P2-6: the throwing form moves the counts of retarget-sequences-4604,
+ * outside the approved rewrites, and waits for the PM); `wAll` —
  * every write throws; `wShort` — a `:retarget` value longer than {@link SHORT_VALUE_LIMIT} and every
  * text write throw; `wBody` — text writes throw; `rmThrow` — every remove throws.
  *

@@ -39,10 +39,14 @@ import { ApiError } from '@/lib/api-client';
 import { mockCommandGroups } from '@tests/helpers/message-input-test-utils';
 import {
   appendToStoredDraft,
+  getDraftValueKey,
   getInstanceDraftKey,
+  getRetargetTagKey,
+  getSendUnknownMarkKey,
   moveDraft,
   newRetargetTag,
   returnRetargetedText,
+  writeRetarget,
 } from '@/lib/drafts/message-draft';
 import { releasePageMarks, stripComments } from '@tests/helpers/draft-store-fault-4604';
 import {
@@ -52,6 +56,7 @@ import {
   installDraftLedger,
   interleavings,
   raw,
+  readDraftPair,
   type DraftLedger,
   type DraftLedgerOptions,
   type LedgerWrite,
@@ -852,5 +857,171 @@ describe('[#4616] a full store: two tabs holding the same tag do not write back 
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
     expect(sendMessageMock.mock.calls[0][2]).toMatchObject({ cliToolId: 'claude', instanceId: I });
     expect(textarea(a)).toBeTruthy();
+  }, RACE_TIMEOUT_MS);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * #4604 S13 t4 (review-4604-s13-b・c, lead-disposition-4604-s13-r1.md): rows added after the fix — the
+ * monitor's controls on the value's shape, the migration (I1's one exception), the real order of two
+ * tasks, the empty save after a send (§1.6), and the keys of before in a full store.
+ * ---------------------------------------------------------------------------------------------- */
+
+const VALUE = getDraftValueKey(K);
+const bareValue = (extra: { tags?: unknown[]; unknown?: string | null } = {}) =>
+  JSON.stringify({ v: 1, text: FENCED, tags: extra.tags ?? [], unknown: extra.unknown ?? null, sendMark: null });
+
+describe('[#4604 S13 t4 G3・I3 の対照（値の形）] the monitor and the fresh composer on the one value (b P2-2)', () => {
+  it('(positive control, I2 on the value\'s branch) once armed, a value holding the fenced text with no tag and no "unknown" is named', () => {
+    ledger.armed = true;
+    ledger.as('probe', () => window.localStorage.setItem(VALUE, bareValue()));
+    expect(ledger.violations).toHaveLength(1);
+    expect(ledger.violations[0]).toContain('probe setItem K:value');
+  });
+
+  it('(negative control, I2 on the value\'s branch) the same value with its tag, or with "unknown", is not named', () => {
+    ledger.armed = true;
+    ledger.as('probe', () => window.localStorage.setItem(VALUE, bareValue({ tags: [newRetargetTag(ORIGINAL)] })));
+    ledger.as('probe', () => window.localStorage.setItem(VALUE, bareValue({ unknown: 'g-t4' })));
+    expect(ledger.violations).toEqual([]);
+  });
+
+  it('(positive control, I3) a composer opened afresh on a value with no mark POSTs on one Enter — freshEnter names it', async () => {
+    raw.set(VALUE, bareValue());
+    expect(await freshEnter()).toContain('POST 1');
+  }, RACE_TIMEOUT_MS);
+
+  it('(negative control, I3) the same value with its tag: the fresh composer asks — freshEnter names nothing', async () => {
+    raw.set(VALUE, bareValue({ tags: [newRetargetTag(ORIGINAL)] }));
+    expect(await freshEnter()).toBeNull();
+  }, RACE_TIMEOUT_MS);
+});
+
+describe('[#4604 S13 t4 G1 移行] the keys of before go into the one value: the value first, then they go (b P2-3, I1\'s one exception)', () => {
+  const seedLegacy = (tag = newRetargetTag(ORIGINAL)) => {
+    raw.set(K, FENCED);
+    raw.set(getRetargetTagKey(K), JSON.stringify([tag]));
+    raw.set(getSendUnknownMarkKey(K), JSON.stringify({ text: 'another text', target: 'x' }));
+  };
+  const named = (from: number) => ledger.writesOf(K, from).map((w) => `${w.method}${w.refused ? '(refused)' : ''} ${w.key.slice(K.length) || 'K'}`);
+
+  it('G1 移行: a composer\'s restore writes the value once, then lets the three keys of before go — in that order', async () => {
+    seedLegacy();
+    const from = ledger.writes.length;
+    const c = mount('c', { tool: 'claude' });
+    await settle('c');
+    expect({ writes: named(from), keys: draftKeysInStore(K), shown: textarea(c).value }).toEqual({
+      writes: ['setItem :value', 'removeItem K', 'removeItem :retarget', 'removeItem :send-unknown'],
+      keys: [VALUE],
+      shown: FENCED,
+    });
+  }, RACE_TIMEOUT_MS);
+
+  it('G1 移行 (a full store): the value does not go in — the keys of before stay, nothing is let go, the text is shown', async () => {
+    takeLedger({ refuse: (key) => key === VALUE });
+    seedLegacy();
+    const from = ledger.writes.length;
+    const c = mount('c', { tool: 'claude' });
+    await settle('c');
+    expect({ writes: named(from), keys: draftKeysInStore(K), shown: textarea(c).value }).toEqual({
+      writes: ['setItem(refused) :value'],
+      keys: [K, getRetargetTagKey(K), getSendUnknownMarkKey(K)],
+      shown: FENCED,
+    });
+  }, RACE_TIMEOUT_MS);
+
+  it('移行の一部の失敗 (c P2-3): the text key of before cannot go — its marks\' keys stay too; after the value is sent, a fresh composer asks', async () => {
+    takeLedger({ removeFault: (key) => key === K });
+    seedLegacy();
+    const c = mount('c', { tool: 'claude' });
+    await settle('c');
+    expect(draftKeysInStore(K)).toEqual([K, getRetargetTagKey(K), getSendUnknownMarkKey(K), VALUE]);
+    enter(c);
+    await settle('c', 30);
+    expect(band(c)).not.toBeNull();
+    ledger.as('c', () => act(() => {
+      yesButton(c).click();
+    }));
+    await settle('c', 30);
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect(raw.get(VALUE)).toBeNull();
+    // The value went: the store reads the keys of before again — the text with its mark (it asks).
+    expect(await freshEnter()).toBeNull();
+  }, RACE_TIMEOUT_MS);
+});
+
+describe('[#4604 S13 t4 満杯×旧い鍵だけ] a send or a move\'s `from` side over the keys of before, the value not fitting (c P2-2)', () => {
+  it('送信: the value (the marks left, no text) does not go in — the text of before goes alone, its marks stay; a fresh composer shows nothing', async () => {
+    const t1 = newRetargetTag(ORIGINAL);
+    const t2 = newRetargetTag(ORIGINAL);
+    takeLedger({ refuse: (key) => key === VALUE });
+    raw.set(K, FENCED);
+    raw.set(getRetargetTagKey(K), JSON.stringify([t1, t2]));
+    const outcome = { written: false };
+    ledger.as('lib', () => writeRetarget(K, { kind: 'sent', ids: [t1.id], seen: null }, { outcome }));
+    expect({ text: raw.get(K), tags: raw.get(getRetargetTagKey(K)), written: outcome.written }).toEqual({
+      text: null,
+      tags: JSON.stringify([t1, t2]),
+      written: false,
+    });
+    const fresh = mount('fresh', { tool: 'claude' });
+    await settle('fresh');
+    expect(textarea(fresh).value).toBe('');
+  }, RACE_TIMEOUT_MS);
+
+  it('移動: `from`\'s value does not go in — its text of before goes alone, `to` holds it: moved', () => {
+    takeLedger({ drafts: [K, K2], refuse: (key) => key === VALUE });
+    raw.set(K, FENCED);
+    raw.set(getRetargetTagKey(K), JSON.stringify([newRetargetTag(ORIGINAL)]));
+    expect(ledger.as('lib', () => moveDraft(K, K2))).toBe('moved');
+    expect({ from: raw.get(K), fromMarks: raw.get(getRetargetTagKey(K)) !== null, to: readDraftPair(K2).text }).toEqual({ from: null, fromMarks: true, to: FENCED });
+  });
+
+  it('移動: `from`\'s text cannot go at all — it is under both: not "moved" (failed)', () => {
+    takeLedger({ drafts: [K, K2], refuse: (key) => key === VALUE, removeFault: (key) => key === K });
+    raw.set(K, FENCED);
+    raw.set(getRetargetTagKey(K), JSON.stringify([newRetargetTag(ORIGINAL)]));
+    expect(ledger.as('lib', () => moveDraft(K, K2))).toBe('failed');
+    expect({ from: raw.get(K), to: readDraftPair(K2).text }).toEqual({ from: FENCED, to: FENCED });
+  });
+});
+
+describe('[#4604 S13 t4 G2 実際の順] two tasks as a browser runs them: one whole, then the other reads and writes (b P2-1)', () => {
+  const races: Array<[string, Race]> = [
+    ['送信×遅らせた保存', { arrange: arrangeSendRace, X: sendA, Y: saveB }],
+    ['送信×切り替え', { arrange: arrangeSendRace, X: sendA, Y: switchB }],
+    ['409×遅らせた保存', { arrange: arrange409Race, X: fence409A, Y: saveB }],
+    ['戻し×遅らせた保存', { arrange: arrangeReturnRace, X: returnA, Y: saveB }],
+  ];
+  for (const [name, race] of races) {
+    for (const order of ['XY', 'YX'] as const) {
+      it(`${name} ${order}: I2 after every write, I3 at the end`, async () => {
+        const t = await race.arrange();
+        ledger.violations.length = 0;
+        const [first, second] = order === 'XY' ? [race.X, race.Y] : [race.Y, race.X];
+        await first.outer(t);
+        await second.outer(t);
+        const i2 = [...ledger.violations];
+        expect({ i2, i3: await freshEnter() }).toEqual({ i2: [], i3: null });
+      }, RACE_TIMEOUT_MS);
+    }
+  }
+});
+
+describe('[#4604 S13 t4 送信の後の空の保存 (§1.6)] the sending tab\'s empty save writes nothing over another tab\'s draft (b P2-4)', () => {
+  it('a sends after its yes; b saves "FENCED more" with its tag; then a\'s held empty save runs — no write, b\'s text stays', async () => {
+    const t = await arrangeSendRace();
+    await sendA.outer(t);
+    expect(ledger.pendingSaves('a')).toBe(1);
+    expect(ledger.fireSaves('b')).toBe(1);
+    await settle('b');
+    const from = ledger.writes.length;
+    expect(ledger.fireSaves('a')).toBe(1);
+    await settle('a');
+    const pair = readDraftPair(K);
+    expect({ aWrites: ledger.writesOf(K, from, 'a').length, text: pair.text, marked: pair.tagIds.length > 0 || pair.unknown }).toEqual({
+      aWrites: 0,
+      text: `${FENCED} more`,
+      marked: true,
+    });
   }, RACE_TIMEOUT_MS);
 });

@@ -294,6 +294,10 @@ describe.each(SHAPES)('[#4607] $name', ({ props, key }) => {
   describe('r2 the one-send yes is never left for a later send', () => {
     const OTHER: Target = { id: 'codex-3', tool: 'codex' };
     const previewKey = `${WT}\u0000${CURRENT.id}`;
+    // Issue #4604 S13 t4 (review b P2-8): this page's mark of a row goes even when the row fails midway.
+    afterEach(() => {
+      releasePageMarks([key]);
+    });
 
     /** `getItem` of any draft's tag key throws while `state.unreadable`; every other key as usual. */
     // Issue #4604 S13: the tags are in a draft's one value — its key is the one that throws.
@@ -342,7 +346,6 @@ describe.each(SHAPES)('[#4607] $name', ({ props, key }) => {
       await settle();
       pressEnter();
       await expectAsksWithoutPost();
-      releasePageMarks([key]);
     });
 
     it('B: a yes carried to the brief, held at its choice by a new tag, is not spent later — Enter POSTs nothing and asks', async () => {
@@ -485,6 +488,11 @@ describe.each(SHAPES)('[#4607] $name', ({ props, key }) => {
         fireEvent.click(screen.getByTestId('message-input-retarget-confirm-yes'));
         await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
         await waitFor(() => expect(getTextarea().value).toBe(''));
+        // Issue #4604 S13 t4 (review b P2-7): the send let t-a go with the value; another tab writes the same
+        // tag back into the draft's value (its composer still holds it) — the store asks for t-a again, and
+        // the yes to it here still holds (the same tag, nothing new).
+        window.localStorage.setItem(valueKey, draftValue({ text: '', tags: [tagOf('t-a', ORIGINAL)] }));
+        expect(readRetargetTags(key).map((tag) => tag.id)).toEqual(['t-a']);
 
         typeMessage(TEXT);
         await settle();

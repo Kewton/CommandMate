@@ -171,6 +171,11 @@ export interface DraftLedgerOptions {
    * shape `throws`; #4604 S13 記憶の軸 A5). Asked at each read, so a test can turn it on and off.
    */
   readFault?: (key: string) => boolean;
+  /**
+   * A remove that fails: a `removeItem` of a draft's key for which this is true throws (nothing changes;
+   * #4604 S13 t4: the migration's partial fold, c P2-3). Asked at each remove.
+   */
+  removeFault?: (key: string) => boolean;
 }
 
 /** G2: run another actor's whole operation just before the `at`-th write (0-based) of `outer`. */
@@ -351,6 +356,11 @@ export function installDraftLedger(options: DraftLedgerOptions): DraftLedger {
       entry.refused = true;
       ledger.writes.push(entry);
       throw new DOMException('full', 'QuotaExceededError');
+    }
+    if (draft !== undefined && method === 'removeItem' && options.removeFault?.(key)) {
+      entry.refused = true;
+      ledger.writes.push(entry);
+      throw new DOMException('denied', 'SecurityError');
     }
     if (method === 'setItem') REAL_SET!.call(storage, key, value as string);
     else REAL_REMOVE!.call(storage, key);
