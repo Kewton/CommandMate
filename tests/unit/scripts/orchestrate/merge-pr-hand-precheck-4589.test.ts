@@ -113,15 +113,17 @@ describe('merge-pr reads the tool precheck (#4589)', () => {
     expect(fake.ghCalls('pr merge')).toHaveLength(0);
   });
 
-  it('M2: only a hand line on this HEAD — the precheck runs, with the options of the tool record of an earlier HEAD', () => {
+  it('M2: only a hand line on this HEAD — not the options of the tool record of an earlier HEAD either: the stop of today (#4617)', () => {
     recordWork();
     appendTool(HEAD_B, 'tsc=ok opts=base:origin/develop,kind:-,metrics:false,allow-removed:false,build:false');
     appendByHand(HEAD_A, `reason ${TOOL_NOTE}`);
-    const r = runMerge(fakeGit({ prs: [openPr()], checks: [GREEN] }));
-    expect(r.prechecks).toHaveLength(1);
-    expect(r.prechecks[0]).not.toContain('--kind');
-    expect(r.prechecks[0]).not.toContain('--allow-removed-tests');
-    expect(r.code, r.err).toBe(0);
+    const fake = fakeGit({ prs: [openPr()], checks: [GREEN] });
+    const r = runMerge(fake);
+    // The options are read on the work HEAD, else this HEAD (run-log.mjs precheckFor), never another HEAD's.
+    expect(r.prechecks).toHaveLength(0);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('no precheck=ok record to take the options from');
+    expect(fake.ghCalls('pr merge')).toHaveLength(0);
   });
 
   it('negative control: the tool record alone is read as before', () => {
