@@ -1561,10 +1561,13 @@ function parseReport(stdout: string, stderr: string, base: string): Ran {
 function placeTicketAhead(base: string, createdAt?: number): void {
   const q = path.join(base, 'supervisor.queue');
   fs.mkdirSync(q, { recursive: true });
+  // #4544 G1: the process first, then the clock — the default createdAt is never before the pid started (a
+  // fork slower than LOCK_PID_REUSE_SLACK_MS − etime's rounding under load read as pid-reused).
+  const pid = liveProcess();
   const now = Date.now();
   fs.writeFileSync(
     path.join(q, '000000000001'),
-    `{"pid":${liveProcess()},"host":"${os.hostname()}","token":"ahead","createdAt":${createdAt ?? now},"deadline":${now + 600_000}}\n`,
+    `{"pid":${pid},"host":"${os.hostname()}","token":"ahead","createdAt":${createdAt ?? now},"deadline":${now + 600_000}}\n`,
   );
 }
 
@@ -1932,8 +1935,13 @@ describe('Issue #4288 PR1c failure outcomes (design §3): every outcome of the t
   /** A pid kill -0 answers alive for although it ended: a child of a process that never waits for it. */
   const zombiePid = (aux: string): number => {
     const f = path.join(aux, 'zpid');
-    // The parent's pid is the outer shell's `$!` (the subshell that execs sleep): /bin/bash 3.2 has no $BASHPID.
-    spawnSync('bash', ['-c', `( sh -c 'exit 0' & echo $! > '${f}'; exec sleep 600 ) </dev/null >/dev/null 2>&1 & echo $! > '${f}.parent'`]);
+    // #4544 G2: the parent is a perl that forks the child and then sleeps without ever calling wait, so the child
+    // ends a zombie whatever order the two run in (a bash subshell reaped the child when it ended before `exec`).
+    // The parent's pid is the outer shell's `$!` (the perl itself: bash execs a lone command in `&`).
+    spawnSync('bash', [
+      '-c',
+      `perl -e 'my $c = fork; defined $c or exit 9; $c or exit 0; open(my $o, ">", $ARGV[0]) or exit 9; print $o "$c\\n"; close $o; sleep 600' '${f}' </dev/null >/dev/null 2>&1 & echo $! > '${f}.parent'`,
+    ]);
     for (let i = 0; i < 300; i++) {
       if (fs.existsSync(`${f}.parent`)) {
         // an empty (half-written) file reads as 0, and kill(0) is the whole process group — only a real pid goes in
@@ -1946,7 +1954,8 @@ describe('Issue #4288 PR1c failure outcomes (design §3): every outcome of the t
       }
       sleepMs(50);
     }
-    throw new Error('no zombie');
+    // the fixture's failure, told apart from the row's: no zombie was made, so the row was never driven
+    throw new Error('fixture: no zombie (the parent reaped it)');
   };
   /** The base a killed supervisor left: it took the lock and was killed (SIGKILL), so its EXIT never ran. */
   const killedHolder = (base: string): string => {
