@@ -16,7 +16,7 @@
  * covered is represented by the stored mark or a page's mark), INV-WB (after a write-back the tags the
  * composer held are in the store — as a list, an "unknown", junk — or in its page's mark).
  *
- * Always run: the numbers of new states for lengths 0〜2 (15 / 545 / 19,350, the model's) with no
+ * Always run: the numbers of new states for lengths 0〜2 (15 / 511 / 15,947; the model's were 15 / 545 / 19,350 — S13 t4b: `rThrow` reads the draft as one that throws, so the road writes nothing over it) with no
  * violation, and each broken version red on its shortest sequence of length ≤ 2. With
  * `CM_RETARGET_MODEL_FULL=1` only: length 3 (554,971 new states) and the narrowed length 4 (the
  * awaited-send race moves: 3 / 91 / 2,681 / 49,269 / 708,480), and N7R red there.
@@ -684,10 +684,10 @@ function withMut<T>(mut: Partial<Mut>, f: () => T): T {
 }
 
 describe('[#4604 T-g] the model\'s sequences on the implementation\'s road (always run: lengths 0〜2)', () => {
-  it('the numbers of new states are the model\'s (15 / 545 / 19,350) and nothing is violated', () => {
+  it('the numbers of new states are the road\'s (15 / 511 / 15,947) and nothing is violated', () => {
     const r = search(2);
     expect(r.first).toBeNull();
-    expect(r.perLen).toEqual([15, 545, 19350]);
+    expect(r.perLen).toEqual([15, 511, 15947]);
     expect(r.violations).toEqual([0, 0, 0]);
   }, 120_000);
 

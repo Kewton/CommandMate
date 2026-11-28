@@ -210,10 +210,8 @@ function draftOfKey(key: string): { draft: string; value: boolean } | null {
 }
 
 /**
- * An in-memory store with the model's failures: `rThrow` — reading `:retarget` throws (S13: a `<K>:value`
- * with no text of its own reads as junk, not as a throw — so the road's "the draft could not be read" branch
- * is not reached from here; review b P2-6: the throwing form moves the counts of retarget-sequences-4604,
- * outside the approved rewrites, and waits for the PM); `wAll` —
+ * An in-memory store with the model's failures: `rThrow` — reading the draft (`<K>:value`, `:retarget`)
+ * throws; `wAll` —
  * every write throws; `wShort` — a `:retarget` value longer than {@link SHORT_VALUE_LIMIT} and every
  * text write throw; `wBody` — text writes throw; `rmThrow` — every remove throws.
  *
@@ -233,10 +231,8 @@ export class MemoryRetargetStorage {
 
   getItem(key: string): string | null {
     const of = draftOfKey(key);
-    // `rThrow`: the marks cannot be read. A value with no text of its own is shown as one the road cannot
-    // read as a value (junk — the road's table reads it as it reads a throw), so the road still knows there
-    // is no text (it writes the marks as "unknown", as it did over a `:retarget` that threw).
-    if (this.fail === 'rThrow' && of !== null && of.value && !this.data.has(key)) return '{"rThrow"';
+    // `rThrow`: the draft cannot be read — the read of its value (or of `:retarget`) throws, so the road
+    // takes its "the draft could not be read" branch (review b P2-6; S13 t4b).
     if (this.fail === 'rThrow' && of !== null) throw new Error('getItem');
     if (of !== null && of.value) {
       const stored = this.data.get(key);

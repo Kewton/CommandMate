@@ -39,6 +39,21 @@ import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
 
 beforeAll(() => installRadixJsdomPolyfills());
 
+/**
+ * Issue #4604 S13 t4b (the monitor's positive control): a mutation of the product made inside this test —
+ * while on, the send's check does not ask for the "unknown" the composer holds itself (it is dropped from
+ * `decideRetarget`), the way a product that forgot its memory would POST.
+ */
+const mutation = vi.hoisted(() => ({ ignoreHeldUnknown: false }));
+vi.mock('@/lib/drafts/message-draft', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/drafts/message-draft')>();
+  return {
+    ...actual,
+    decideRetarget: (...args: Parameters<typeof actual.decideRetarget>) =>
+      actual.decideRetarget(args[0], args[1], args[2], args[3], mutation.ignoreHeldUnknown ? null : (args[4] ?? null)),
+  };
+});
+
 vi.mock('next-intl', async () => {
   const { createRealIntlMock } = await import('@tests/helpers/real-intl');
   return createRealIntlMock('ja');
@@ -278,6 +293,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   window.localStorage.clear();
+  mutation.ignoreHeldUnknown = false;
 });
 
 // ---------------------------------------------------------------- the table
@@ -365,17 +381,19 @@ function noteQuestion(name: string, to: Target) {
   expect(inComposer(name).getByTestId('message-input-retarget-confirm')).toBeInTheDocument();
   const onScreen = (inComposer(name).getByTestId('message-input-textarea') as HTMLTextAreaElement).value;
   const facts = storeFacts(oracle.key);
-  // Issue #4604 S13: a composer also asks for the "unknown" it holds itself (the generation its restore
-  // read), once the store no longer says it (another composer's send let it go — nothing is written back
-  // from a `storage` event; its next save puts it back): its band says the marks cannot be checked, so the
-  // question shows an "unknown".
-  const band = inComposer(name).getByTestId('message-input-retarget-confirm').textContent ?? '';
-  if (facts.seen.length === 0 && band.includes('確かめられませんでした')) facts.seen.push('held-unknown');
+  const shown = oracle.pieces.filter((piece) => onScreen.includes(piece.text));
+  // Issue #4604 S13 t4b: what the monitor observed itself — this question was shown in `name` (its band is
+  // up: asserted above) while these pieces were on screen. A piece under an "unknown" was shown by it, its
+  // generation too (the composer may ask for the "unknown" it holds once the store no longer says it: the
+  // store's facts would not name it). Never the product's words.
+  for (const piece of shown) {
+    if (piece.generation !== null && !facts.seen.includes(piece.generation)) facts.seen.push(piece.generation);
+  }
   pendingQuestions[name] = {
     key: oracle.key,
     to,
     ...facts,
-    texts: oracle.pieces.filter((piece) => onScreen.includes(piece.text)).map((piece) => piece.text),
+    texts: shown.map((piece) => piece.text),
   };
 }
 function sayYes(name: string) {
@@ -531,6 +549,62 @@ describe('[#4604 T-P] composer exits × events (PC split pane)', () => {
         await pressComposer('A', TO_A, exit);
       }
     }
+    expect(oracle.violations).toEqual([]);
+  });
+});
+
+describe('[#4604 S13 t4b] the monitor\'s positive control: a product that forgets the "unknown" its composer holds', () => {
+  it('(mutation) B holds the "unknown" its restore read; A says yes and sends; B\'s Enter does not ask but POSTs — the monitor names it', async () => {
+    oracle.key = KEY;
+    pendingQuestions.A = null;
+    pendingQuestions.B = null;
+    window.localStorage.setItem(KEY, 'hello');
+    window.localStorage.setItem(getRetargetTagKey(KEY), JSON.stringify({ unknown: 'g1', tags: [] }));
+    oracle.pieces.push({ text: 'hello', tagId: null, original: null, generation: 'g1' });
+    render(
+      <>
+        <Composer name="A" to={TO_A} blocked={false} />
+        <Composer name="B" to={TO_B} blocked={false} />
+      </>,
+    );
+    await flush(30);
+    fireEvent.keyDown(inComposer('A').getByTestId('message-input-textarea'), { key: 'Enter', code: 'Enter' });
+    await flush(30);
+    noteQuestion('A', TO_A);
+    sayYes('A');
+    await flush(50);
+    expect(oracle.posts).toHaveLength(1);
+    expect((inComposer('B').getByTestId('message-input-textarea') as HTMLTextAreaElement).value).toBe('hello');
+    mutation.ignoreHeldUnknown = true;
+    fireEvent.keyDown(inComposer('B').getByTestId('message-input-textarea'), { key: 'Enter', code: 'Enter' });
+    await flush(50);
+    expect(oracle.posts).toEqual([{ to: TO_A, content: 'hello' }, { to: TO_B, content: 'hello' }]);
+    expect(oracle.violations).toEqual([`POST to ${show(TO_B)} carries "hello" — no fact allows it`]);
+  });
+
+  it('(negative control, the same order unmutated) B\'s Enter asks: no POST to its To', async () => {
+    oracle.key = KEY;
+    pendingQuestions.A = null;
+    pendingQuestions.B = null;
+    window.localStorage.setItem(KEY, 'hello');
+    window.localStorage.setItem(getRetargetTagKey(KEY), JSON.stringify({ unknown: 'g1', tags: [] }));
+    oracle.pieces.push({ text: 'hello', tagId: null, original: null, generation: 'g1' });
+    render(
+      <>
+        <Composer name="A" to={TO_A} blocked={false} />
+        <Composer name="B" to={TO_B} blocked={false} />
+      </>,
+    );
+    await flush(30);
+    fireEvent.keyDown(inComposer('A').getByTestId('message-input-textarea'), { key: 'Enter', code: 'Enter' });
+    await flush(30);
+    noteQuestion('A', TO_A);
+    sayYes('A');
+    await flush(50);
+    fireEvent.keyDown(inComposer('B').getByTestId('message-input-textarea'), { key: 'Enter', code: 'Enter' });
+    await flush(50);
+    expect(oracle.posts).toEqual([{ to: TO_A, content: 'hello' }]);
+    expect(inComposer('B').getByTestId('message-input-retarget-confirm')).toBeInTheDocument();
     expect(oracle.violations).toEqual([]);
   });
 });
