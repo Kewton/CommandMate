@@ -6,10 +6,21 @@
  *
  *   until [ -z "$(ps -axo comm=,args= | awk '($1 ~ /(^|\/)node$/ && /vitest|next build|precheck\.mjs/) || ($1 ~ /(^|\/)bash$/ && /verify-run\.sh/)')" ]; do sleep 15; done;
  *
- * A heavy run is a process whose command (`comm`, by its basename) is
- *   - `node` and whose args name `vitest`, `next build` or `precheck.mjs`, or
- *   - `bash` and whose args name `verify-run.sh`
- * — the same set as v4 (I1). Not counted (I2): the shell running a wait (its comm is zsh / bash / sh,
+ * The set of heavy runs is the same set as v4 (I1), but the role is read from the position of the script,
+ * not from a word anywhere in the args (#4651). v4 looked at the whole args, so a request body or an option
+ * value that named `vitest` / `next build` / `precheck.mjs` / `verify-run.sh` counted — a `commandmate send`
+ * with a request in its body, `verify --gates vitest` — and every wait on the machine stopped. Here the
+ * words after `node` are read left to right (the args split on whitespace; a path with a space is read by
+ * its words, the same miss v4 has), node's own options and the value of those that take one are skipped,
+ * and the first word left is the script. A `node` row counts when that script is
+ *   - `vitest` / `vitest.mjs`, or a path holding `/vitest/` (a worker's `…/vitest/dist/workers/forks.js`),
+ *   - `next` with `build` next,
+ *   - `precheck.mjs` (a precheck's own wait reads it only through its children, `precheckPeers: false`),
+ *   - `npx` / `npx-cli.js` with `vitest` next, or `npm` / `npm-cli.js` with `exec vitest` next: v4 counted
+ *     this parent too, and counting it starts the wait before the child exists (the child counts as well);
+ *   with `-e` / `--eval` / `-p` / `--print` there is no script, so nothing is counted.
+ * A `bash` row counts when its script, after its options, is `verify-run.sh`; a `-c` string is not a script.
+ * Not counted (I2): the shell running a wait (its comm is zsh / bash / sh,
  * and only bash with `verify-run.sh` is a run), `wait-verify.mjs` (it waits for a reply; nothing heavy),
  * the queue table's text (this script never reads it), and this process and every ancestor of it
  * (a `node precheck.mjs` does not wait for itself, nor merge-pr's inner process for its outer one).
@@ -46,10 +57,10 @@ export const NOTICE_MS = 5 * 60_000;
 /** The columns the entry reads. */
 export const PS_ARGS = ['-axo', 'pid=,ppid=,comm=,args='];
 
-const NODE_HEAVY = /vitest|next build|precheck\.mjs/;
-/** What `node` runs heavy without counting another precheck itself ({@link heavyRuns} `precheckPeers: false`). */
-const NODE_HEAVY_WORK = /vitest|next build/;
-const BASH_HEAVY = /verify-run\.sh/;
+/** node's options that take their value in the next word (`--x=y` is already one word). */
+const NODE_VALUE_OPTIONS = new Set(['-r', '--require', '--import', '--loader', '--experimental-loader', '-C', '--conditions']);
+/** node's options that run a string instead of a script: there is no script to read after them. */
+const NODE_EVAL_OPTIONS = /^(?:--eval|--print)(?:=|$)|^-[ep]$/;
 
 /**
  * The rows of `ps -axo pid=,ppid=,comm=,args=`. A line that does not start with two numbers is skipped.
@@ -67,13 +78,60 @@ export function parsePs(text) {
   return rows;
 }
 
-/** The basename of a `comm`: `/usr/local/bin/node` → `node`. */
-function commName(comm) {
-  return comm.slice(comm.lastIndexOf('/') + 1);
+/** The basename of a path (a `comm`, or a script in the args): `/usr/local/bin/node` → `node`. */
+function baseName(p) {
+  return p.slice(p.lastIndexOf('/') + 1);
+}
+
+/**
+ * The index in the args words of the script node runs: the words after argv0, with node's own options and
+ * the value of those that take one skipped. -1 when there is no script (`-e` / `--eval` / `-p` / `--print`).
+ */
+function scriptIndex(words) {
+  for (let i = 1; i < words.length; i++) {
+    const word = words[i];
+    if (word === '--') return i + 1 < words.length ? i + 1 : -1;
+    if (!word.startsWith('-')) return i;
+    if (NODE_EVAL_OPTIONS.test(word)) return -1;
+    if (NODE_VALUE_OPTIONS.has(word)) i += 1;
+  }
+  return -1;
+}
+
+/** A `vitest` script by name (the path holding `/vitest/` is checked by {@link isHeavyScript}). */
+const isVitestName = (word) => word !== undefined && (baseName(word) === 'vitest' || baseName(word) === 'vitest.mjs');
+
+/**
+ * Whether the script at `at` in the args words of a `node` row is a heavy run: the script's position decides,
+ * so a request body or an option value that names a heavy word is not a run (#4651).
+ */
+function isHeavyScript(words, at, precheckPeers) {
+  const script = words[at];
+  if (script === undefined) return false;
+  if (script.includes('/vitest/') || isVitestName(script)) return true;
+  const name = baseName(script);
+  if (name === 'next') return words[at + 1] === 'build';
+  if (name === 'precheck.mjs') return precheckPeers;
+  if (name === 'npx' || name === 'npx-cli.js') return isVitestName(words[at + 1]);
+  if (name === 'npm' || name === 'npm-cli.js') return words[at + 1] === 'exec' && isVitestName(words[at + 2]);
+  return false;
+}
+
+/** Whether a `bash` row's script, after its options, is `verify-run.sh`; `-c` runs a string, not a script. */
+function isHeavyBash(words) {
+  for (let i = 1; i < words.length; i++) {
+    const word = words[i];
+    if (word === '--') return i + 1 < words.length && baseName(words[i + 1]) === 'verify-run.sh';
+    if (!word.startsWith('-')) return baseName(word) === 'verify-run.sh';
+    if (/^-[a-zA-Z]*c[a-zA-Z]*$/.test(word)) return false;
+  }
+  return false;
 }
 
 /**
  * Whether a row is a heavy run by itself (I1), before the own process and its ancestors are left out.
+ * The role is the script the row runs, read from its position in the args, not a word anywhere in them:
+ * a `commandmate send` whose body holds a request, or `verify --gates vitest`, is not a run (#4651).
  * `precheckPeers: false` (a precheck's own wait): a `node … precheck.mjs` row counts only through what it
  * runs (its vitest / next build child). Two prechecks waiting before a heavy step would otherwise each
  * count the other's process and wait for ever; this way both read zero and start, the window of I3.
@@ -82,9 +140,14 @@ function commName(comm) {
  * @param {{ precheckPeers?: boolean }} [options]
  */
 export function isHeavyRow({ comm, args }, { precheckPeers = true } = {}) {
-  const name = commName(comm);
-  if (name === 'node') return (precheckPeers ? NODE_HEAVY : NODE_HEAVY_WORK).test(args);
-  if (name === 'bash') return BASH_HEAVY.test(args);
+  const text = String(args).trim();
+  const words = text === '' ? [] : text.split(/\s+/);
+  const name = baseName(comm);
+  if (name === 'node') {
+    const at = scriptIndex(words);
+    return at >= 0 && isHeavyScript(words, at, precheckPeers);
+  }
+  if (name === 'bash') return isHeavyBash(words);
   return false;
 }
 
