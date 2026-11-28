@@ -69,7 +69,7 @@ import process from 'node:process';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { appendRecord, findLatest, readRecords } from './run-log.mjs';
+import { appendRecord, findLatest, precheckFor, readRecords } from './run-log.mjs';
 import { itemOption, workHeadOf } from './pr-common.mjs';
 import { dirtyPaths } from './dirty-tree.mjs';
 import { allocateLog, executionKey, workItemName } from './execution-key.mjs';
@@ -701,7 +701,8 @@ export function main(argv, deps = {}) {
     // published HEAD, not for the worker's checks (run-log.mjs WORK_STAGES).
     const workHead = workHeadOf(run, o.worktree, head, { records, issue, item });
     if (!o.force) {
-      const previous = findLatest(records, { issue, item, stage: 'precheck', head });
+      // precheck.mjs's own latest record of this HEAD, never a line added by hand (#4614 run-log.mjs precheckFor).
+      const previous = precheckFor(records, { issue, item, role: 'gate', head });
       if (previous && previous.result === 'ok') {
         const done = parseNote(previous.note);
         // A step left to CI counts as done only for another --heavy-to-ci precheck (#4265).
