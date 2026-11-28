@@ -816,7 +816,7 @@ type RowK = { name: string; comm: string; args: string; count: boolean; precheck
 /** The four tools and the two waits that wait: never a heavy run themselves (K10-I2). */
 const WAITER_ROWS: RowK[] = [
   { name: 'wait-verify with vitest in its args', comm: 'node', args: 'node /w/scripts/orchestrate/wait-verify.mjs --issue 1 --gates vitest', count: false },
-  { name: 'merge-pr with next build in its args', comm: 'node', args: 'node /w/scripts/orchestrate/merge-pr.mjs --issue 1 --note "next build"', count: false },
+  { name: 'merge-pr with next build in its args', comm: 'node', args: 'node /w/scripts/orchestrate/merge-pr.mjs --issue 1 --note next build', count: false },
   { name: 'merge-train with precheck.mjs in its args', comm: 'node', args: 'node /w/scripts/orchestrate/merge-train.mjs --queue 1 precheck.mjs', count: false },
   { name: 'heavy-runs wait', comm: 'node', args: 'node /w/scripts/orchestrate/heavy-runs.mjs wait', count: false },
   { name: 'commandmate wait with vitest in its args', comm: 'node', args: 'node /w/bin/commandmate.js wait wt-1 --instance c --timeout 60 --gates vitest', count: false },
@@ -842,14 +842,27 @@ const TABLE_K: RowK[] = [
   { name: 'option: --max-old-space-size=4096 before vitest', comm: 'node', args: 'node --max-old-space-size=4096 /w/node_modules/.bin/vitest run', count: true },
   { name: 'option: --import tsx (a value in the next word) before vitest', comm: 'node', args: 'node --import tsx /w/node_modules/.bin/vitest run', count: true },
   { name: 'option: -r x (a value in the next word) before precheck.mjs', comm: 'node', args: 'node -r x /w/scripts/orchestrate/precheck.mjs --issue 1', count: true },
-  { name: 'option: -e with vitest in the code', comm: 'node', args: 'node -e "require(\'vitest\')"', count: false },
+  { name: 'option: -e with vitest in the code', comm: 'node', args: "node -e require('vitest')", count: false },
+  { name: 'option: --disable-warning X (a value in the next word) before vitest', comm: 'node', args: 'node --disable-warning ExperimentalWarning /w/node_modules/.bin/vitest run', count: true },
+  { name: 'option: --env-file .env (a value in the next word) before vitest', comm: 'node', args: 'node --env-file .env /w/node_modules/.bin/vitest run', count: true },
+  { name: 'option: -pe (a bundle of -p and -e) with vitest next', comm: 'node', args: 'node -pe /w/node_modules/.bin/vitest', count: false },
+  { name: 'option: -ep (a bundle of -e and -p) with vitest next', comm: 'node', args: 'node -ep /w/node_modules/.bin/vitest', count: false },
+  { name: 'option: -e with vitest next (there is no script after -e)', comm: 'node', args: 'node -e /w/node_modules/.bin/vitest', count: false },
+  { name: 'node -- (end of options) then vitest', comm: 'node', args: 'node -- /w/node_modules/.bin/vitest run', count: true },
   { name: 'next dev is not next build', comm: 'node', args: 'node /w/node_modules/.bin/next dev', count: false },
   { name: 'a script of another name with next build in its args', comm: 'node', args: 'node /w/scripts/build.mjs next build', count: false },
   // bash: a `-c` string is not a script file; another script with the word in its args is not one either.
-  { name: 'bash -c with verify-run.sh in the string', comm: '/bin/bash', args: '/bin/bash -c "/w/scripts/verify-run.sh unit"', count: false },
+  { name: 'bash -c with verify-run.sh in the string', comm: '/bin/bash', args: '/bin/bash -c /w/scripts/verify-run.sh unit', count: false },
   { name: 'bash with another script and verify-run.sh in its args', comm: '/bin/bash', args: '/bin/bash /w/scripts/other.sh verify-run.sh', count: false },
-  // The npx / npm exec parent: counted (v4 counted it too), so the wait starts before the child exists.
+  // bash's options that take a value in the next word are skipped with it.
+  { name: 'bash -o pipefail (a value in the next word) before verify-run.sh', comm: '/bin/bash', args: '/bin/bash -o pipefail /w/scripts/verify-run.sh --cwd /w', count: true },
+  { name: 'bash -O extglob (a value in the next word) before verify-run.sh', comm: '/bin/bash', args: '/bin/bash -O extglob /w/scripts/verify-run.sh --cwd /w', count: true },
+  { name: 'bash -euo pipefail (a bundle ending in the -o that takes a value) before verify-run.sh', comm: '/bin/bash', args: '/bin/bash -euo pipefail /w/scripts/verify-run.sh --cwd /w', count: true },
+  { name: 'bash -- (end of options) then verify-run.sh', comm: '/bin/bash', args: '/bin/bash -- /w/scripts/verify-run.sh --cwd /w', count: true },
+  // The npx / npm exec parent is counted too, so the wait starts before the child exists; npm rewrites
+  // process.title (`npm exec vitest …`) and comm to npm right after, so the row lasts an instant.
   { name: 'the npx parent that runs vitest', comm: 'node', args: 'node /w/node_modules/npm/bin/npx-cli.js vitest run tests/unit/a.test.ts', count: true },
+  { name: 'the npm exec parent that runs vitest', comm: 'node', args: 'node /usr/lib/node_modules/npm/bin/npm-cli.js exec vitest run tests/unit/a.test.ts', count: true },
 ];
 
 describe('表 K: the role by the script position, not by a word in the args (#4651 K10-I1 / K10-I2)', () => {
