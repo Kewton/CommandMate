@@ -281,7 +281,7 @@ function judge(role: Role, shape: Shape, lines: Line[]) {
   for (const line of lines) writeLine(shape, line, `${line.writer === 'hand' ? 'leader note' : 'tsc=ok'} env=${envOf(line.n)}`);
   const records = readRecords(runDir, String(ISSUE)).records;
   const reasons = missingRecords(records, ISSUE, { head: p, workHead: HEADS[shape].W }, null, { runDir, worktree, home, warn: () => {} })
-    .filter((reason: string) => reason.startsWith('precheck:'));
+    .filter((reason) => String(reason).startsWith('precheck:'));
   if (!expected) expect(reasons).toEqual([`precheck: no result for ${short(p)} (6-1-1)`]);
   else if (expected.result === 'fail') expect(reasons).toEqual([`precheck: fail at ${short(p)} (6-1-1)`]);
   else expect(reasons).toEqual([expect.stringMatching(new RegExp(`^precheck: environment missing — env=${envOf(expected.n)}:`))]);

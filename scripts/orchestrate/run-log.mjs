@@ -341,8 +341,8 @@ export function findLatest(records, criteria) {
  * `criteria` (as findLatest reads them, `stage` aside) that precheck.mjs wrote
  * itself — a line added by hand (isHandPrecheck) is passed over, so its missing
  * env= and options are never taken for the tool's. Only a hand line: null, as
- * when there is no record. merge-pr, publish (pr-common.mjs missingRecords) and
- * the train all read the precheck by this one rule.
+ * when there is no record. The scripts do not call it with their own criteria:
+ * every reader picks its line by precheckFor below (#4617), which reads through it.
  */
 export function gatePrecheck(records, criteria) {
   return findLatest((records ?? []).filter((record) => !isHandPrecheck(record)), { ...criteria, stage: 'precheck' });

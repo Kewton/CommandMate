@@ -39,7 +39,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { appendRecord, gatePrecheck, inItem, readRecords } from './run-log.mjs';
+import { appendRecord, inItem, precheckFor, readRecords } from './run-log.mjs';
 import { acquireMachineLockSync, describeOwner, lockPathOf, readHolder } from './machine-lock-sync.mjs';
 import { machineLockRoot, main as runPrecheckMain, optionsFromNote } from './precheck.mjs';
 import { heavyWaiter } from './heavy-runs.mjs';
@@ -525,9 +525,9 @@ export function classifyEntries(o, deps) {
       continue;
     }
     // C4, C5
-    const precheck =
-      gatePrecheck(records, { issue, item, head: workHead, result: 'ok' }) ??
-      gatePrecheck(records, { issue, item, head, result: 'ok' });
+    // The options of the latest tool precheck of the work HEAD, else of the HEAD (#4617 run-log.mjs precheckFor):
+    // the line merge-pr's re-run takes its options from too.
+    const precheck = precheckFor(records, { issue, item, role: 'options', head, workHead });
     const optsToken = String(precheck?.note ?? '').split(/\s+/).find((word) => word.startsWith('opts='));
     if (!precheck || !optsToken) {
       drop('precheck-options-unknown');

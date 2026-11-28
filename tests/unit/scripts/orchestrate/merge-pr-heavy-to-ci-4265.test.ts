@@ -26,7 +26,7 @@ import {
   main as precheckMain,
   parseNote,
 } from '../../../../scripts/orchestrate/precheck.mjs';
-import { DEVELOP, HEAD_A, HEAD_B, HEAD_M, type Check, fakeGit, openPr } from './pr-fake';
+import { DEVELOP, HEAD_A, HEAD_M, type Check, fakeGit, openPr } from './pr-fake';
 
 let tmp: string;
 let runDir: string;
@@ -212,8 +212,8 @@ const fake0Precheck = (fake: ReturnType<typeof fakeGit>) => fake.calls.some((c) 
 describe('without a refresh the precheck takes cpu.heavy as before (#4265 negative controls)', () => {
   it('merge-pr without a refresh, on a HEAD with no precheck yet, waits for the lock and holds with exit 3', () => {
     recordWork(HEAD_A, { precheck: false });
-    // The options come from another HEAD's precheck=ok.
-    appendRecord(runDir, '3477', { issue: 3477, stage: 'precheck', result: 'ok', head: HEAD_B, note: `tsc=ok ${OPTS}` });
+    // The options come from the work HEAD's own (failed) precheck line (#4617 run-log.mjs precheckFor, role options).
+    appendRecord(runDir, '3477', { issue: 3477, stage: 'precheck', result: 'fail', head: HEAD_A, note: `tsc=fail ${OPTS}` });
     const lock = heavyLock(false);
     const fake = fakeGit({ prs: [openPr()], behind: false, checks: [GREEN] });
     const { code, err } = runMerge(fake, lock);
