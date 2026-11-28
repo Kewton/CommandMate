@@ -6,10 +6,30 @@
  *
  *   until [ -z "$(ps -axo comm=,args= | awk '($1 ~ /(^|\/)node$/ && /vitest|next build|precheck\.mjs/) || ($1 ~ /(^|\/)bash$/ && /verify-run\.sh/)')" ]; do sleep 15; done;
  *
- * A heavy run is a process whose command (`comm`, by its basename) is
- *   - `node` and whose args name `vitest`, `next build` or `precheck.mjs`, or
- *   - `bash` and whose args name `verify-run.sh`
- * — the same set as v4 (I1). Not counted (I2): the shell running a wait (its comm is zsh / bash / sh,
+ * The set of heavy runs is close to v4's (I1), but the role is read from the position of the script, not
+ * from a word anywhere in the args (#4651) — so it differs from v4 where a word sat in the args alone.
+ * v4 looked at the whole args, so a request body or an option value that named `vitest` / `next build` /
+ * `precheck.mjs` / `verify-run.sh` counted — a `commandmate send` with a request in its body,
+ * `verify --gates vitest` — and every wait on the machine stopped. Here the words after `node` are read
+ * left to right (the args split on whitespace; a path with a space is read by its words, the same miss v4
+ * has), node's own options and the value of those that take one are skipped, and the first word left is the
+ * script. A `node` row counts when that script is
+ *   - `vitest` / `vitest.mjs`, or a path holding `/vitest/` (a worker's `…/vitest/dist/workers/forks.js`),
+ *   - `next` with `build` next,
+ *   - `precheck.mjs` (a precheck's own wait reads it only through its children, `precheckPeers: false`),
+ *   - `npx` / `npx-cli.js` with `vitest` next, or `npm` / `npm-cli.js` with `exec vitest` next. v4 counted
+ *     this parent too, and the child `node …/vitest` counts as well; but npm rewrites `process.title` to
+ *     `npm exec vitest …` right after start (comm becomes npm), so the parent row is countable only for the
+ *     instant before that — it is the child that holds the role for the length of the run;
+ *   with `-e` / `--eval` / `-p` / `--print` (or a bundle holding `e` / `p`, like `-pe`) there is no script,
+ *   so nothing is counted; `--` ends node's options and the word after it is the script.
+ * A `bash` row counts when its script, after its options, is `verify-run.sh`; a `-c` string is not a script,
+ * and the value of `-o` / `-O` / `+o` / `+O` / `--rcfile` / `--init-file` (`-o pipefail`) is not either.
+ * v4 counted the first of these differences too (`bash -c '…verify-run.sh…'`), so the two sets differ here.
+ *
+ * macOS's `ps` cuts `comm` to 16 characters (`/opt/homebrew/Ce…`), so a worker forked through `execPath`
+ * may not read as `node` at all (v4 has the same); the vitest main, whose comm is `node`, still counts.
+ * Not counted (I2): the shell running a wait (its comm is zsh / bash / sh,
  * and only bash with `verify-run.sh` is a run), `wait-verify.mjs` (it waits for a reply; nothing heavy),
  * the queue table's text (this script never reads it), and this process and every ancestor of it
  * (a `node precheck.mjs` does not wait for itself, nor merge-pr's inner process for its outer one).
@@ -46,10 +66,36 @@ export const NOTICE_MS = 5 * 60_000;
 /** The columns the entry reads. */
 export const PS_ARGS = ['-axo', 'pid=,ppid=,comm=,args='];
 
-const NODE_HEAVY = /vitest|next build|precheck\.mjs/;
-/** What `node` runs heavy without counting another precheck itself ({@link heavyRuns} `precheckPeers: false`). */
-const NODE_HEAVY_WORK = /vitest|next build/;
-const BASH_HEAVY = /verify-run\.sh/;
+/**
+ * node's options that take their value in the next word (`--x=y` is already one word). From node's
+ * `--help` list of options printed with a value (`--opt=...`), keeping the ones whose value the next word
+ * may be: `node --env-file .env script.mjs` runs the script, `node --max-old-space-size 4096 script.mjs`
+ * does not (that one needs `=`), so it is not here.
+ */
+const NODE_VALUE_OPTIONS = new Set([
+  '-r', '--require', '--import', '--loader', '--experimental-loader', '-C', '--conditions',
+  '--allow-fs-read', '--allow-fs-write', '--build-snapshot-config', '--cpu-prof-dir', '--cpu-prof-interval',
+  '--cpu-prof-name', '--debug-port', '--diagnostic-dir', '--disable-proto', '--disable-warning',
+  '--dns-result-order', '--env-file', '--env-file-if-exists', '--experimental-config-file',
+  '--experimental-default-type', '--experimental-sea-config', '--heap-prof-dir', '--heap-prof-interval',
+  '--heap-prof-name', '--heapsnapshot-near-heap-limit', '--heapsnapshot-signal', '--icu-data-dir',
+  '--input-type', '--inspect-port', '--inspect-publish-uid', '--localstorage-file',
+  '--max-http-header-size', '--network-family-autoselection-attempt-timeout', '--openssl-config',
+  '--redirect-warnings', '--report-signal', '--secure-heap', '--secure-heap-min', '--snapshot-blob',
+  '--test-concurrency', '--test-coverage-branches', '--test-coverage-exclude', '--test-coverage-functions',
+  '--test-coverage-include', '--test-coverage-lines', '--test-global-setup', '--test-name-pattern',
+  '--test-reporter', '--test-reporter-destination', '--test-shard', '--test-skip-pattern', '--test-timeout',
+  '--title', '--tls-cipher-list', '--tls-keylog', '--trace-event-categories', '--trace-event-file-pattern',
+  '--trace-require-module', '--unhandled-rejections', '--use-largepages', '--v8-pool-size', '--watch-path',
+]);
+/**
+ * node's options that run a string instead of a script: there is no script to read after them.
+ * The single-dash form may be a bundle (`-pe` is `-p` and `-e`), so any `e` / `p` in it means eval.
+ */
+const NODE_EVAL_OPTIONS = /^(?:--eval|--print)(?:=|$)|^-[a-zA-Z]*[ep][a-zA-Z]*$/;
+
+/** bash's options that take their value in the next word (`-o pipefail`, `-O extglob`, `--rcfile x`). */
+const BASH_VALUE_OPTIONS = new Set(['-o', '-O', '+o', '+O', '--rcfile', '--init-file']);
 
 /**
  * The rows of `ps -axo pid=,ppid=,comm=,args=`. A line that does not start with two numbers is skipped.
@@ -67,13 +113,65 @@ export function parsePs(text) {
   return rows;
 }
 
-/** The basename of a `comm`: `/usr/local/bin/node` → `node`. */
-function commName(comm) {
-  return comm.slice(comm.lastIndexOf('/') + 1);
+/** The basename of a path (a `comm`, or a script in the args): `/usr/local/bin/node` → `node`. */
+function baseName(p) {
+  return p.slice(p.lastIndexOf('/') + 1);
+}
+
+/**
+ * The index in the args words of the script node runs: the words after argv0, with node's own options and
+ * the value of those that take one skipped. -1 when there is no script (`-e` / `--eval` / `-p` / `--print`).
+ */
+function scriptIndex(words) {
+  for (let i = 1; i < words.length; i++) {
+    const word = words[i];
+    if (word === '--') return i + 1 < words.length ? i + 1 : -1;
+    if (!word.startsWith('-')) return i;
+    if (NODE_EVAL_OPTIONS.test(word)) return -1;
+    if (NODE_VALUE_OPTIONS.has(word)) i += 1;
+  }
+  return -1;
+}
+
+/** A `vitest` script by name (the path holding `/vitest/` is checked by {@link isHeavyScript}). */
+const isVitestName = (word) => word !== undefined && (baseName(word) === 'vitest' || baseName(word) === 'vitest.mjs');
+
+/**
+ * Whether the script at `at` in the args words of a `node` row is a heavy run: the script's position decides,
+ * so a request body or an option value that names a heavy word is not a run (#4651).
+ */
+function isHeavyScript(words, at, precheckPeers) {
+  const script = words[at];
+  if (script === undefined) return false;
+  if (script.includes('/vitest/') || isVitestName(script)) return true;
+  const name = baseName(script);
+  if (name === 'next') return words[at + 1] === 'build';
+  if (name === 'precheck.mjs') return precheckPeers;
+  if (name === 'npx' || name === 'npx-cli.js') return isVitestName(words[at + 1]);
+  if (name === 'npm' || name === 'npm-cli.js') return words[at + 1] === 'exec' && isVitestName(words[at + 2]);
+  return false;
+}
+
+/**
+ * Whether a `bash` row's script, after its options, is `verify-run.sh`; `-c` runs a string, not a script.
+ * `-o pipefail` / `-O extglob` / `--rcfile x` take their value in the next word, and a bundle ending in
+ * `o` (`-euo pipefail`) does too: the value is skipped with the option.
+ */
+function isHeavyBash(words) {
+  for (let i = 1; i < words.length; i++) {
+    const word = words[i];
+    if (word === '--') return i + 1 < words.length && baseName(words[i + 1]) === 'verify-run.sh';
+    if (!word.startsWith('-') && !word.startsWith('+')) return baseName(word) === 'verify-run.sh';
+    if (/^-[a-zA-Z]*c[a-zA-Z]*$/.test(word)) return false;
+    if (BASH_VALUE_OPTIONS.has(word) || /^-[a-zA-Z]*[oO]$/.test(word)) i += 1;
+  }
+  return false;
 }
 
 /**
  * Whether a row is a heavy run by itself (I1), before the own process and its ancestors are left out.
+ * The role is the script the row runs, read from its position in the args, not a word anywhere in them:
+ * a `commandmate send` whose body holds a request, or `verify --gates vitest`, is not a run (#4651).
  * `precheckPeers: false` (a precheck's own wait): a `node … precheck.mjs` row counts only through what it
  * runs (its vitest / next build child). Two prechecks waiting before a heavy step would otherwise each
  * count the other's process and wait for ever; this way both read zero and start, the window of I3.
@@ -82,9 +180,14 @@ function commName(comm) {
  * @param {{ precheckPeers?: boolean }} [options]
  */
 export function isHeavyRow({ comm, args }, { precheckPeers = true } = {}) {
-  const name = commName(comm);
-  if (name === 'node') return (precheckPeers ? NODE_HEAVY : NODE_HEAVY_WORK).test(args);
-  if (name === 'bash') return BASH_HEAVY.test(args);
+  const text = String(args).trim();
+  const words = text === '' ? [] : text.split(/\s+/);
+  const name = baseName(comm);
+  if (name === 'node') {
+    const at = scriptIndex(words);
+    return at >= 0 && isHeavyScript(words, at, precheckPeers);
+  }
+  if (name === 'bash') return isHeavyBash(words);
   return false;
 }
 
