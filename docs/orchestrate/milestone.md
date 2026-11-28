@@ -26,7 +26,7 @@ team.md §13・PM のロールの報告と着手の確かめ・plan-check.md の
 計画の承認の日と、途中の替え（足す・外す・Sprint の替え）を人が承認したときは、同じ手番で次の 4 つを行い、台帳に 1 行書く。道具には移させない（読み取り専用）。
 
 1. 承認された表のとおり Issue を移す（`gh issue edit <N> --milestone "<名前>"`、外すときは `--remove-milestone`）
-2. 今の Sprint が替わるなら `.commandmate/flow.yaml` の `milestone.current` を替える
+2. 今の Sprint が替わるなら `.commandmate/flow.yaml` の `milestone.current` を替える（追跡されるファイルなので develop への小さな PR で入れ、4 の check はマージの後に流す）
 3. #4461 に変更をコメントで残す（移した Issue・理由・承認の出どころ）。記録の無い移動は検査の M6 に出る
 4. `node scripts/orchestrate/milestone-check.mjs check` が exit 0。62 なら行の `detail` を読んで直し、流し直す。61 は「ずれ無し」と読まない
 
@@ -38,18 +38,19 @@ team.md §13・PM のロールの報告と着手の確かめ・plan-check.md の
 - 定期の見張り（PM の台帳の 30 分ごとの行）
 - PR のマージの後
 - 人への区切りの報告の前（`summary --md` の出力を報告の頭に貼る。報告の形は [roles/project-manager.md](roles/project-manager.md#報告)）
-- 人の承認（「推奨で」を含む）の後、次のディスパッチの前（上の 4 つの後に、Milestone の位置と変えた差分を 1〜3 行で返す）
+- 人の承認（「推奨で」を含む）の後、次のディスパッチの前（「承認の日の移し」の 1〜4 の後に、Milestone の位置と変えた差分を 1〜3 行で返す）
 
 ## Sprint を閉じる条件
 
-次の 3 つがそろったら PM が Milestone を閉じ、#4461 にコメントする。
+次の 4 つがそろったら PM が Milestone を閉じ、#4461 にコメントする。
 
 - 受け入れ: 審判のまとめが合格、または不合格の項目の扱いを人が決めた（team.md §9）
 - リリース: 人が承認したリリースが出た
 - 整合: 残った Issue を下の手順で移した後に、`milestone-check.mjs check` が exit 0
+- 振り返り: PM が区切りの振り返りを書いた（[roles/project-manager.md](roles/project-manager.md#場面ごとに必ずすること) の区切りの終わり）
 
 その Sprint に OPEN で残った Issue は、Issue ごとに「次の Sprint へ送る」か「候補に戻す（Milestone を外す）」かを人が決める。PM は Issue ごとに推奨をつけて聞き、決まったら上の「承認の日の移しと途中の替え」の 4 つを行う。
-次の Sprint の計画には、前の Sprint の閉じ方（上の 3 つと check の exit）を欄に書く（[plan-check.md の計画の欄](plan-check.md#1-4-sprint-の計画の欄)）。閉じていなければ、欠けている条件と見込みを書いて人の承認を受ける。黙って着手しない。
+次の Sprint の計画には、前の Sprint の閉じ方（上の 4 つと check の exit）を欄に書く（[plan-check.md の計画の欄](plan-check.md#1-4-sprint-の計画の欄)）。閉じていなければ、欠けている条件と見込みを書いて人の承認を受ける。黙って着手しない。
 
 ## 再起動の後の読み直し
 

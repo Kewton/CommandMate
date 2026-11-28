@@ -51,7 +51,7 @@ Sprint の計画（PM が人に出す表）に、次の 4 つの欄を置く。�
 | 欄 | 書くこと | 決まりの正本 |
 |---|---|---|
 | 難の割合 | 難（opus）の作業単位の数と全体の数。難は全体の半分以下（人の指示 11-28 00:0x、人の決定 11-28 12:52） | この節 |
-| Command Code の枠 | Command Code に回す作業単位の数と、実験の枠（opus 級 1〜2 本）の Issue の番号 | [command-code.md 1-2b](command-code.md#1-2b-command-code-に回す前提) |
+| Command Code の枠 | Command Code に回す作業単位の数と、実験の枠（opus 級 1〜2 本）の Issue の番号。実験の枠は難の割合にも数える | [command-code.md 1-2b](command-code.md#1-2b-command-code-に回す前提) |
 | bug | Sprint に入れる bug は `rca-ready` の塊だけ。塊のファイルと親の Issue | [bug-flow.md](bug-flow.md#3-計画に入れる) |
 | 前の Sprint の閉じ方 | 受け入れ・リリース・`milestone-check.mjs check` の exit（0 でなければ欠けている条件と見込み） | [milestone.md](milestone.md#sprint-を閉じる条件) |
 
