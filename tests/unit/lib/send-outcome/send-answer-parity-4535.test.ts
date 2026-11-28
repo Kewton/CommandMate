@@ -48,6 +48,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { classifySendAnswer, type SendFact } from '@/lib/send-outcome/classify-send-answer';
 import { isSendOutcomeUnknown } from '@/hooks/usePendingMessages';
 import { ApiError, worktreeApi } from '@/lib/api-client';
+import { handoffApi } from '@/lib/handoff/screen-client';
 import { interpretSendResponse, sendNewTask, type NewTaskSendResult } from '@/lib/new-task/send-new-task';
 
 const JSON_TYPE = 'application/json; charset=utf-8';
@@ -451,5 +452,47 @@ describe('[#4535 INV-S3 r5] the New task dialog reads the same answers to the sa
       'U2 400 JSON without code ({ error } only)',
       'U2 409 JSON with an unknown code',
     ]));
+  });
+});
+
+/**
+ * Issue #4632: the hand-off dialog's own text send (`handoffApi.sendText`) reads a 2xx with the same
+ * table. `sent` only for the CLI's S1 / S2; every other 2xx is `unknown`. The one intended difference
+ * is D6 (an `ask`-only 2xx: the screen never sends an `ask`), as on the composer and the New task dialog.
+ */
+const HANDOFF_2XX: Array<{ answer: WireAnswer; cli: SendFact; handoff: SendFact; d6?: boolean }> = [
+  { answer: json('S1', '201 ChatMessage', 201, { id: 'm', role: 'user', content: 'x' }), cli: 'sent', handoff: 'sent' },
+  { answer: json('S2', "201 ChatMessage, sendOutcome 'unknown'", 201, { id: 'm', role: 'user', content: 'x', sendOutcome: 'unknown' }), cli: 'sent', handoff: 'sent' },
+  { answer: json('S4', "201 ChatMessage, sendOutcome 'not_sent'", 201, { id: 'm', role: 'user', content: 'x', sendOutcome: 'not_sent' }), cli: 'unknown', handoff: 'unknown' },
+  { answer: json('S1', "201 ChatMessage + ask.sendState 'not_sent'", 201, { id: 'm', role: 'user', content: 'x', ask: { sendState: 'not_sent' } }), cli: 'unknown', handoff: 'unknown' },
+  { answer: page('S4', '200 bare HTML page', 200, HTML_TYPE, '<html>proxy</html>'), cli: 'unknown', handoff: 'unknown' },
+  { answer: page('S4', '201 application/json with an empty body', 201, JSON_TYPE, ''), cli: 'unknown', handoff: 'unknown' },
+  { answer: json('S4', '201 JSON that is not a ChatMessage ({})', 201, {}), cli: 'unknown', handoff: 'unknown' },
+  { answer: json('S3', "201 ask only (sendState 'sent'), no ChatMessage", 201, { ask: { sendState: 'sent' } }), cli: 'sent', handoff: 'unknown', d6: true },
+];
+
+/** The hand-off text send's fact for one 2xx (its own fetch stub). */
+async function handoffFact(answer: WireAnswer): Promise<SendFact> {
+  vi.stubGlobal('fetch', vi.fn(async () => toResponse(answer)));
+  try {
+    const result = await handoffApi.sendText('wt-1', 'hello', { cliToolId: 'claude', instanceId: 'claude' });
+    if (result.ok) return 'sent';
+    return result.outcome === 'unknown' ? 'unknown' : 'not_sent';
+  } finally {
+    vi.unstubAllGlobals();
+  }
+}
+
+describe('[#4632] the hand-off text send reads a 2xx to the CLI’s fact (D6 an intended difference)', () => {
+  it.each(HANDOFF_2XX.map((row) => [`${row.answer.row} ${row.answer.name}`, row] as const))('%s', async (_name, row) => {
+    expect(readCli(row.answer)).toBe(row.cli);
+    expect(await handoffFact(row.answer)).toBe(row.handoff);
+  });
+
+  it('the column is whole: 8 rows, and D6 is the only intended difference', () => {
+    expect(HANDOFF_2XX).toHaveLength(8);
+    expect(HANDOFF_2XX.filter((row) => row.d6).map((row) => row.answer.name)).toEqual([
+      "201 ask only (sendState 'sent'), no ChatMessage",
+    ]);
   });
 });

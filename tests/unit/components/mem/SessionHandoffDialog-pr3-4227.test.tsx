@@ -30,7 +30,15 @@ let request: HandoffRequestView;
 let createAnswer: 'ok' | 'request_open';
 
 const view = (): HandoffReadResponse => ({ ok: true, request: { ...request }, proposals: [], direct: [] });
-const json = (status: number, body: unknown) => ({ ok: status < 300, status, json: async () => body }) as Response;
+// Issue #4632 (追記 4): the send reads the 2xx body as text; a fake Response without `headers` and
+// `text()` would make the read throw and the send unknown. They are the only additions.
+const json = (status: number, body: unknown) => ({
+  ok: status < 300,
+  status,
+  headers: new Headers({ 'content-type': 'application/json' }),
+  json: async () => body,
+  text: async () => JSON.stringify(body),
+}) as Response;
 
 function baseRequest(): HandoffRequestView {
   return {
@@ -67,7 +75,7 @@ beforeEach(() => {
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
     const path = url.replace(/^\/api\/worktrees\/wt-1/, '');
     calls.push({ method, path, body });
-    if (path === '/send') return json(201, { id: 'm1' });
+    if (path === '/send') return json(201, { id: 'm1', role: 'user' });
     if (path === '/mem/handoff/requests' && method === 'POST') {
       if (createAnswer === 'request_open') return json(409, { ...view(), ok: false, code: 'request_open', text: 'the picked-up text' });
       request = { ...request, sendState: 'unsent' };
