@@ -620,8 +620,9 @@ function marksPart(next: RetargetStoreValue): Pick<DraftValue, 'tags' | 'unknown
  * write: (1) read the value once, (2) the next value — its marks by {@link nextRetarget}, its text and its
  * #4503 mark by the op — (3) write it (an empty value removes the key; a value equal to the stored one is
  * not written again unless the marks' table asks for a write — §3.4.1), (4) if that throws and the marks
- * were to change, the short value (the text and the #4503 mark kept, no tag, "unknown" of a new generation
- * — #4616 受入 1, reusing the store's generation, is not in: see changelog.d/4616.md), (5) if that throws
+ * were to change, the short value (the text and the #4503 mark kept, no tag, "unknown": for a write-back
+ * of the marks a composer holds — a save, a switch — the store's generation when it says "unknown" already,
+ * so the yes to a question that saw it still covers it — #4616 受入 1 —; else a new one), (5) if that throws
  * too, this page's mark (a new generation): `'unstored'` — another tab, or this page after a reload, cannot
  * know. A release or a move's `from` side does not take steps 4・5 (letting go never adds an "ask"). What
  * could not be read is never written over as known: it becomes "unknown".
@@ -756,7 +757,10 @@ export function writeRetarget(draftKey: string, op: DraftOp, env: RetargetEnv = 
     if (transition !== null && transition.next !== null && !transition.failClosed) return 'unstored';
   }
   try {
-    const generation = newGeneration();
+    // #4616 受入 1: a write-back of the marks a composer holds (a save, a switch) adds nothing the store's
+    // "unknown" has not covered — its generation stays (a yes to a question that saw it still covers it).
+    // A text or a tag that comes into the draft (an append, an add, a move) takes a new one (N-7).
+    const generation = prev.marks.kind === 'unknown' && (op.kind === 'save' || op.kind === 'writeBack') ? prev.marks.generation : newGeneration();
     storage.setItem(valueKey, encodeDraftValue({ text, tags: [], unknown: generation, sendMark }));
     foldLegacy(false);
     outcome.written = true;
