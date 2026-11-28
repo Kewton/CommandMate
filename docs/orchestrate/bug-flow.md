@@ -9,7 +9,7 @@ team.md §13・ci-merge.md 6-2・plan-check.md の計画の欄・イネーブラ
 - 新しい bug の Issue にするのは、develop で赤になる再現がある P1・P2 だけ。fix の Issue には `bug` のラベルを付ける
 - レビュー・受け入れの範囲の外の P3 は、新しい Issue にせず、親の Issue の追跡の表に 1 行で置く。親の無い P3・未確認の候補は起票せず、Sprint の候補の一覧（`workspace/orchestration/runs/<日付>/followup-candidates.md`）に 1 行で足す（日時・出どころのファイル・中身・根の候補）
 - 起票した bug には `bug` と `needs-rca` を付け、Milestone を付けない
-- 例外（P1。基準は PM の案で、この PR の承認の対象）: 利用者のデータ・安全・公開の入口を壊す P1 と、develop の CI を赤のままにする P1 は、PM が人の承認で今の Sprint に入れてよい。そのときも 2 の真因と横展開は直しと並行して書き、直しの PR の前にそろえる
+- 例外（P1。基準は 11-28 に人の委任で PM が承認）: 利用者のデータ・安全・公開の入口を壊す P1 と、develop の CI を赤のままにする P1 は、PM が人の承認で今の Sprint に入れてよい。そのときも 2 の真因と横展開は直しと並行して書き、直しの PR の前にそろえる
 
 ## 2 真因・横展開・対策（イネーブラー）
 
