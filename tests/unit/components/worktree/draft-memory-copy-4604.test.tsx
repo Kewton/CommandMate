@@ -78,6 +78,14 @@ vi.mock('@/lib/handoff/screen-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/handoff/screen-client')>();
   return { ...actual, fetchStartPreview: fetchStartPreviewMock };
 });
+/**
+ * #4604 S13 t5 (the positive control of 読み直し): mutations made in this test — `holdsNothing`: the
+ * composer's read again of a draft its restore could not read (`textToSave`) holds nothing of what it reads
+ * (`heldMarksOf`, which only that read calls in MessageInput, answers "absent"); `ownWriteForgets`: the
+ * composer's own writes through the road get no marks back (`writeRetarget` called from MessageInput leaves
+ * `outcome.marks` unset — the lib's own calls are not touched).
+ */
+const rereadMutation = vi.hoisted(() => ({ holdsNothing: false, ownWriteForgets: false }));
 // Two tabs are two documents: the in-page channels of the draft reach the calling tab's composers only.
 vi.mock('@/lib/drafts/message-draft', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/drafts/message-draft')>();
@@ -86,6 +94,13 @@ vi.mock('@/lib/drafts/message-draft', async (importOriginal) => {
     ...actual,
     subscribeRetargetedText: perTab(actual.subscribeRetargetedText),
     subscribeDraftAppend: perTab(actual.subscribeDraftAppend),
+    heldMarksOf: (...args: Parameters<typeof actual.heldMarksOf>) =>
+      rereadMutation.holdsNothing ? { kind: 'absent' as const } : actual.heldMarksOf(...args),
+    writeRetarget: (...args: Parameters<typeof actual.writeRetarget>) => {
+      const result = actual.writeRetarget(...args);
+      if (rereadMutation.ownWriteForgets && args[2]?.outcome) delete args[2].outcome.marks;
+      return result;
+    },
   };
 });
 vi.mock('@/hooks/useSlashCommands', () => ({
@@ -226,6 +241,8 @@ beforeEach(() => {
   takeLedger();
 });
 afterEach(() => {
+  rereadMutation.holdsNothing = false;
+  rereadMutation.ownWriteForgets = false;
   cleanup();
   ledger.restore();
   vi.restoreAllMocks();
@@ -841,6 +858,169 @@ for (const writer of WRITERS) {
     });
   }
 }
+
+/* ------------------------------------------------------------------------------------------------
+ * #4604 S13 t5 (enabler の表の 6): 読み直し — tab a's composer opened while the draft could not be read (its
+ * restore showed nothing); later the draft reads, and a's save reads it again (`textToSave`): the text comes
+ * back in front of what a typed, and a holds its marks from that read (記憶は値から, entry 4). Tab b (opened
+ * once the draft reads, so it holds the marks) then sends with its yes — or saves. I2・I3 (every open
+ * composer and a fresh one)・I4 (weak), as the pairs above. Seeds: the marks as a list, "unknown", junk, and
+ * a store still throwing at a's first save (it reads at the second).
+ * ---------------------------------------------------------------------------------------------- */
+
+type RereadSeed = Exclude<Seed, 'absent'>;
+const REREAD_SEEDS: RereadSeed[] = ['list', 'unknown', 'junk', 'throws'];
+
+/** The draft in `seed`; a opens while its value cannot be read; then b opens on a store that reads. */
+async function arrangeReread(seed: RereadSeed): Promise<World> {
+  await reset();
+  seedValue(K, seed, newRetargetTag(ORIGINAL));
+  faultKeys = [getDraftValueKey(K)];
+  faultOn = true;
+  const a = mount('a');
+  await settle('a');
+  expect(shownOf(a)).toBe('');
+  faultOn = false;
+  const b = mount('b');
+  await settle('b');
+  // a's save held from its mount runs while the draft still reads as before (b's too: nothing to write).
+  faultOn = true;
+  ledger.fireSaves('a');
+  await settle('a');
+  faultOn = false;
+  ledger.fireSaves('b');
+  await settle('b');
+  await ledger.deliver();
+  expect(shownOf(a)).toBe('');
+  return { a, b, seed };
+}
+
+/** Tab a types and its save runs: the draft is read again (`throws`: the first save still cannot read it). */
+async function rereadA(w: World): Promise<void> {
+  const a = w.a!;
+  type(a, typedAfter(a, 'a'));
+  await settle('a');
+  if (w.seed === 'throws') {
+    faultOn = true;
+    ledger.fireSaves('a');
+    await settle('a');
+    faultOn = false;
+    type(a, `${shownOf(a)} again`);
+    await settle('a');
+  }
+  ledger.fireSaves('a');
+  await settle('a');
+}
+
+/** One order of 読み直し × `other` (the same checks as {@link runOrder}). */
+async function runReread(other: OtherName, seed: RereadSeed, order: 'XY' | 'YX', cut: number | null): Promise<{ i2: string[]; i3: string[]; i4: string[] }> {
+  const w = await arrangeReread(seed);
+  const X = async () => rereadA(w);
+  const Y = async () => OTHER_OPS[other](w);
+  const deliver = async () => {
+    await ledger.deliver();
+  };
+  const tasks: Array<[string, () => Promise<void>]> =
+    order === 'XY'
+      ? [['読み直し', X], ['deliver', deliver], [other, Y], ['deliver', deliver]]
+      : [[other, Y], ['deliver', deliver], ['読み直し', X], ['deliver', deliver]];
+  for (const [i, [name, task]] of tasks.entries()) {
+    await task();
+    // The read again brought the text back (the draft still held it: XY's first task; junk holds none).
+    if (order === 'XY' && i === 0 && seed !== 'junk') expect(tagged(shownOf(w.a!))).toBe(true);
+    if (cut === i) return { i2: [], i3: [], i4: await probeI4(w, `${order} after #${i} ${name}`) };
+  }
+  for (const t of openOf(w)) {
+    if (!tagged(shownOf(t))) continue;
+    type(t, `${shownOf(t)} .`);
+    await settle(t.name);
+    ledger.fireSaves(t.name);
+  }
+  await ledger.deliver();
+  const i2 = ledger.violations.map((v) => `${order} ${v}`);
+  const i3: string[] = [];
+  for (const t of openOf(w)) {
+    const shown = shownOf(t);
+    if (!tagged(shown)) continue;
+    const before = posts();
+    enter(t);
+    await settle(t.name, 30);
+    const n = posts() - before;
+    if (n > 0) i3.push(`${order} open ${t.name}: shows ${JSON.stringify(shown)}: Enter → POST ${n}, no question`);
+  }
+  const fresh = await freshEnter();
+  if (fresh !== null) i3.push(`${order} ${fresh}`);
+  return { i2, i3, i4: [] };
+}
+
+async function rereadCombo(other: OtherName, seed: RereadSeed): Promise<ComboResult> {
+  const out: ComboResult = { i2: [], i3: [], i4: [], orders: 0, checkpoints: 0 };
+  for (const order of ORDERS) {
+    const r = await runReread(other, seed, order, null);
+    out.i2.push(...r.i2);
+    out.i3.push(...r.i3);
+    out.orders += 1;
+  }
+  for (const cut of CHECKPOINTS) {
+    const r = await runReread(other, seed, 'XY', cut);
+    out.i4.push(...r.i4);
+    out.checkpoints += 1;
+  }
+  await reset();
+  return out;
+}
+
+const rereadResults = new Map<string, Promise<ComboResult>>();
+const rereadOf = (other: OtherName, seed: RereadSeed): Promise<ComboResult> => {
+  const id = `${other}|${seed}`;
+  let result = rereadResults.get(id);
+  if (result === undefined) {
+    result = rereadCombo(other, seed);
+    rereadResults.set(id, result);
+  }
+  return result;
+};
+
+describe('[#4604 S13 t5 A4 読み直し] the pairs: 読み直し × the other tab\'s 送信（はい）and 保存, over 4 seeds', () => {
+  it('the pairs: 2 other-tab ops × 4 seeds = 8, each in 2 orders with 4 I4 checkpoints', () => {
+    expect({ combos: OTHERS.length * REREAD_SEEDS.length, orders: ORDERS.length, checkpoints: CHECKPOINTS.length }).toEqual({ combos: 8, orders: 2, checkpoints: 4 });
+  });
+});
+
+for (const other of OTHERS) {
+  describe(`[#4604 S13 t5 A4] 読み直し×別のタブの${other}`, () => {
+    for (const seed of REREAD_SEEDS) {
+      it(`種 ${seed}: I2 after every write (both orders)`, async () => {
+        expect((await rereadOf(other, seed)).i2).toEqual([]);
+      }, RACE_TIMEOUT_MS);
+      it(`種 ${seed}: I3 — every open composer and a fresh one, at the end (A3)`, async () => {
+        expect((await rereadOf(other, seed)).i3).toEqual([]);
+      }, RACE_TIMEOUT_MS);
+      it(`種 ${seed}: I4 (weak) after every task of XY (A2)`, async () => {
+        expect((await rereadOf(other, seed)).i4).toEqual([]);
+      }, RACE_TIMEOUT_MS);
+    }
+  });
+}
+
+describe('[#4604 S13 t5 読み直しの陽性対照] the read again holds nothing (mutations in this test)', () => {
+  for (const seed of ['list', 'unknown'] as const) {
+    it(`種 ${seed}: the read again and the save after it both hold nothing — once b sends with its yes, a\'s Enter POSTs unasked (I3・I4 red)`, async () => {
+      rereadMutation.holdsNothing = true;
+      rereadMutation.ownWriteForgets = true;
+      const r = await rereadCombo('送信（はい）', seed);
+      expect({ i3: r.i3.length > 0, i4: r.i4.length > 0 }).toEqual({ i3: true, i4: true });
+    }, RACE_TIMEOUT_MS);
+    it(`種 ${seed}: (the read again alone holds nothing) the save that follows it holds the same marks from its own write — green`, async () => {
+      // The read again is followed by a save of the same draft in both of its callers (the debounced save,
+      // the switch): that write gives back the marks the value holds (記憶は値から, entry 1) — at least
+      // what the read read. So the read's own hold is not what this pair rests on.
+      rereadMutation.holdsNothing = true;
+      const r = await rereadCombo('送信（はい）', seed);
+      expect({ i2: r.i2, i3: r.i3, i4: r.i4 }).toEqual({ i2: [], i3: [], i4: [] });
+    }, RACE_TIMEOUT_MS);
+  }
+});
 
 /* ------------------------------------------------------------------------------------------------
  * (i) #728's legacy key, a full store. (ii) #4616 受入 1, a save between the question and the yes.
