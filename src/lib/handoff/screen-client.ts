@@ -36,6 +36,7 @@ import {
   type HandoffPageRequest,
   type HandoffPageRequestKind,
 } from '@/lib/handoff/page-registration';
+import { classifySendAnswer } from '@/lib/send-outcome/classify-send-answer';
 import type {
   HandoffCreateResponse,
   HandoffDecideResponse,
@@ -47,10 +48,17 @@ import type { StartPreviewResponse } from './preview';
 export const HANDOFF_SCREEN_TIMEOUT_MS = 30000;
 
 export type HandoffResult<T> =
-  | { ok: true; status: number; body: T; refused?: undefined }
+  | { ok: true; status: number; body: T; outcome?: undefined; refused?: undefined }
   | {
       ok: false;
       status: number;
+      /**
+       * Issue #4632: the send's 2xx said nothing about whether the text went in (the CLI's table
+       * read `unknown`: D2–D4, an `ask`-only answer, or a ChatMessage whose `sendOutcome` /
+       * `ask.sendState` says otherwise). Not a failure: the caller keeps it and asks before a
+       * second send (`mem.handoff.sendUnknown`). The record is still `send-failed`.
+       */
+      outcome?: 'unknown';
       code?: string;
       body?: Record<string, unknown>;
       /** Issue #4345 1b: the answer was the session's expiry and the registry took it for `owner`. */
@@ -65,6 +73,7 @@ export type HandoffResult<T> =
        */
       refused: HandoffPageOperationRefusedError;
       status?: undefined;
+      outcome?: undefined;
       code?: undefined;
       body?: undefined;
       expired?: undefined;
@@ -90,7 +99,20 @@ function beginOwnedRequest(owner: HandoffRequestOwner, kind: HandoffPageRequestK
   return beginHandoffPageRequest(owner, { kind, inside: true });
 }
 
-async function call<T>(url: string, init: RequestInit | undefined, owner: HandoffRequestOwner, kind: HandoffPageRequestKind): Promise<HandoffResult<T>> {
+/**
+ * Issue #4632: the 2xx reader a caller may hand over (`sendText` only, as #4603's `fetchApi` takes
+ * `readOk`). Without it every 2xx is read as before; with it the caller decides whether the 2xx is a
+ * success. A body-read failure still leaves through the catch as `{ ok: false, status: 0 }`.
+ */
+type ReadHandoffOk<T> = (response: Response) => Promise<HandoffResult<T>>;
+
+async function call<T>(
+  url: string,
+  init: RequestInit | undefined,
+  owner: HandoffRequestOwner,
+  kind: HandoffPageRequestKind,
+  readOk?: ReadHandoffOk<T>
+): Promise<HandoffResult<T>> {
   // Issue #4345 1b: the owner and the order are fixed as the request leaves.
   const authRequest = beginOwnedRequest(owner, kind);
   // 再指示 2 (K1): the gate, right before the fetch — refused, nothing is sent (no timer either).
@@ -110,6 +132,8 @@ async function call<T>(url: string, init: RequestInit | undefined, owner: Handof
     // The middleware's redirect to /login (followed by `fetch`, a 200 of HTML): the expiry, never a
     // success with an empty body. Its body is not read.
     if (response.redirected && isHandoffAuthExpiry(response)) return { ok: false, status: 401, expired };
+    // Issue #4632: the caller's own reading of a 2xx (the text's send), before the shared JSON read.
+    if (response.ok && readOk) return await readOk(response);
     let body: Record<string, unknown> = {};
     try {
       body = (await response.json()) as Record<string, unknown>;
@@ -177,6 +201,9 @@ export const handoffApi = {
   /**
    * The request's text, sent as any message of the screen is (the send route), with
    * `brief: 'skip'`: a conversation that ends gets no brief and its boundary stays (§4.2).
+   * Issue #4632: its 2xx is read with the CLI's own table (`classifySendAnswer`): `sent` only for
+   * S1 / S2; every other 2xx is `{ ok: false, status, outcome: 'unknown' }`. The non-2xx, the
+   * `/login` redirect, a transport failure and the gate's refusal are read as before.
    */
   sendText: (worktreeId: string, text: string, target: { cliToolId: string; instanceId: string }, owner?: HandoffRequestOwner) =>
     call<unknown>(
@@ -187,7 +214,24 @@ export const handoffApi = {
         body: JSON.stringify({ content: text, cliToolId: target.cliToolId, instanceId: target.instanceId, brief: 'skip' }),
       },
       owner,
-      'operation'
+      'operation',
+      async (response) => {
+        const contentType = response.headers?.get('content-type') ?? null;
+        let bodyText: string;
+        try {
+          bodyText = await response.text();
+        } catch {
+          // Issue #4632 (追記 4): a failure while the 2xx body is read (cut, stalled) is the CLI's
+          // U3 — not sent, but not known either. The old `{ ok: true, body: {} }` read it as sent,
+          // which is the bug this Issue fixes. The status (the 2xx) is known and kept.
+          return { ok: false, status: response.status, outcome: 'unknown' };
+        }
+        const classified = classifySendAnswer({ kind: 'response', status: response.status, contentType, bodyText });
+        if (classified.fact === 'sent' && (classified.row === 'S1' || classified.row === 'S2')) {
+          return { ok: true, status: response.status, body: JSON.parse(bodyText) as unknown };
+        }
+        return { ok: false, status: response.status, outcome: 'unknown' };
+      }
     ),
 };
 

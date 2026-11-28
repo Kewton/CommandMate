@@ -200,7 +200,7 @@ beforeEach(() => {
       if (killMode === 'errored') return reply(500, { error: 'boom' });
       return reply(200, { success: true, message: 'ok' });
     }
-    if (rest === '/send') return reply(201, { id: 'm1' });
+    if (rest === '/send') return reply(201, { id: 'm1', role: 'user' });
     if (rest === '/mem/handoff/requests' && method === 'POST') {
       if (worktree !== A) return reply(409, { ok: false, code: 'session_unknown' });
       if (createMode === 'hold') await new Promise<void>((resolve) => (releaseCreate = resolve));

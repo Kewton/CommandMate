@@ -442,7 +442,20 @@ async function stubServer(context: BrowserContext): Promise<Server> {
             server.running = true;
             server.conversation += 1;
           }
-          return ok({ success: true, message: { id: `m-${server.sends.length}` } });
+          // The real 201 is the sent message itself (`send/route.ts`: a `ChatMessage`, not
+          // `{ success, message }`): #4535/#4632 read a 2xx as a send only in that shape (a string
+          // `id` and `role: 'user'`), so the screen records `/sent` only for this.
+          return json(route, 201, {
+            id: `m-${server.sends.length}`,
+            worktreeId: WT,
+            role: 'user',
+            content: body.content,
+            timestamp: '2026-11-09T00:00:00.000Z',
+            messageType: 'normal',
+            cliToolId: body.cliToolId,
+            instanceId: body.instanceId,
+            archived: false,
+          });
         }
         if (sub.startsWith('/current-output')) {
           return ok({
