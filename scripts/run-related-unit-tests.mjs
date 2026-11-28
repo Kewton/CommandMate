@@ -574,18 +574,46 @@ export function mergeDurations(files, own, peers, baseline = new Map()) {
 }
 
 /**
+ * What a file with no record weighs when the only records of the set are the
+ * repository's baseline (#4640): the baseline keeps the files of 5 s or more, so
+ * its median is 9,695 ms and the 1,351 light files were estimated 5.4 times
+ * their true duration (every group read `expected=3722.7s`; the truth was about
+ * 690 s). The value is the mean duration of the 1,351 files under 5 s in the
+ * judge's C1 measure (1430 files, no cache, 2026-11-27): 295.7 ms, rounded.
+ */
+export const NO_RECORD_DEFAULT_MS = 300;
+
+/**
+ * The options `splitLpt` takes for a merged set (#4640): the no-record default
+ * only when the baseline is the sole source of weights (own 0, peer 0, baseline
+ * 1 or more). With any own or peer record the median of the recorded files stays
+ * the default, as before (I1).
+ *
+ * @param {{ own: number, peer: number, baseline?: number }} merged
+ * @returns {{ defaultWeight: number } | undefined}
+ */
+export function splitOptionsFor(merged) {
+  if (merged.own === 0 && merged.peer === 0 && (merged.baseline ?? 0) >= 1) {
+    return { defaultWeight: NO_RECORD_DEFAULT_MS };
+  }
+  return undefined;
+}
+
+/**
  * Longest-processing-time-first: each file, heaviest first, goes to the group
  * with the smallest load so far; between equal loads, to the one with fewer
- * files. A file without a record weighs the median of the recorded files in the
- * set (1 if none is recorded). No group is left empty: an empty group has load 0
- * and 0 files, so it is always a minimum while it exists (weights are >= 0).
+ * files. A file without a record weighs `options.defaultWeight` when it is
+ * given, else the median of the recorded files in the set (1 if none is
+ * recorded). No group is left empty: an empty group has load 0 and 0 files, so
+ * it is always a minimum while it exists (weights are >= 0).
  *
  * @param {string[]} files
  * @param {Map<string, number>} durations
  * @param {number} [maxGroups]
+ * @param {{ defaultWeight?: number }} [options] the weight of a file with no record (#4640)
  * @returns {{ groups: string[][], expectedMs: number[], defaultWeight: number, known: number }}
  */
-export function splitLpt(files, durations, maxGroups = MAX_GROUPS) {
+export function splitLpt(files, durations, maxGroups = MAX_GROUPS, options = {}) {
   const recorded = files
     .filter((f) => durations.has(f))
     .map((f) => /** @type {number} */ (durations.get(f)))
@@ -595,6 +623,7 @@ export function splitLpt(files, durations, maxGroups = MAX_GROUPS) {
     const mid = Math.floor(recorded.length / 2);
     defaultWeight = recorded.length % 2 === 1 ? recorded[mid] : (recorded[mid - 1] + recorded[mid]) / 2;
   }
+  if (typeof options.defaultWeight === 'number') defaultWeight = options.defaultWeight;
   const n = Math.min(Math.max(1, maxGroups), files.length);
   /** @type {string[][]} */
   const groups = Array.from({ length: n }, () => []);
@@ -768,21 +797,57 @@ function defaultTmpBase() {
 }
 
 /**
- * `--write-baseline --source <text>` (#4594): writes this worktree's own records
- * (the own store, then vitest's cache) of BASELINE_MIN_MS or more into the
- * repository's baseline, rounded, in path order. Updated by hand only: whoever
- * updates it says where the measure came from. Runs no test.
+ * `--write-baseline --source <text> [--allow-drop]` (#4594, #4640): writes this
+ * worktree's own records (the own store, then vitest's cache) of BASELINE_MIN_MS
+ * or more into the repository's baseline, rounded, in path order. Updated by
+ * hand only: whoever updates it says where the measure came from. Runs no test.
  *
- * exit 0 written; exit 1 no own record long enough, or the file could not be
- * written (the existing baseline is kept); exit 2 no `--source`.
+ * #4640: the own records of a worktree that ran part of the suite would drop the
+ * heavy files it did not run from the baseline, silently. So when a path of the
+ * current baseline is not in the new content and its file is still in the
+ * repository, nothing is written: exit 1 and the paths on stderr. `--allow-drop`
+ * writes such a drop; a path whose file has left the repository is dropped
+ * without the flag.
+ *
+ * #4640 P3-1: a current baseline that reads neither `ok` nor `missing` (corrupt)
+ * has no paths to compare against, so it too stops the write without
+ * `--allow-drop` (one line on stderr says why).
+ *
+ * exit 0 written; exit 1 no own record long enough, a path would be dropped, the
+ * current baseline is corrupt, or the file could not be written (the existing
+ * baseline is kept); exit 2 no `--source`, a `--source` value that begins with
+ * `--`, or an argument other than `--source <text>` / `--allow-drop`.
  *
  * @param {string[]} argv the arguments after `--write-baseline`
- * @param {{ root: string, log: (msg: string) => void, now: () => Date, readCache: typeof readDurationCache, readStore: typeof readDurationStore }} deps
+ * @param {{ root: string, log: (msg: string) => void, now: () => Date, readCache: typeof readDurationCache, readStore: typeof readDurationStore, readBaseline: typeof readBaselineDurations }} deps
  * @returns {number}
  */
-function writeBaseline(argv, { root, log, now, readCache, readStore }) {
-  if (!(argv.length === 2 && argv[0] === '--source' && argv[1].trim())) {
-    console.error('Usage: node scripts/run-related-unit-tests.mjs --write-baseline --source "<where the measure came from>"');
+function writeBaseline(argv, { root, log, now, readCache, readStore, readBaseline }) {
+  const usage = 'Usage: node scripts/run-related-unit-tests.mjs --write-baseline --source "<where the measure came from>" [--allow-drop]';
+  /** @type {string | null} */
+  let source = null;
+  let allowDrop = false;
+  for (let i = 0; i < argv.length; i++) {
+    // #4640 P3-2: a value that begins with `--` is another flag, not the source
+    // (`--source --allow-drop` used to record the source as "--allow-drop").
+    if (
+      argv[i] === '--source' &&
+      source === null &&
+      i + 1 < argv.length &&
+      argv[i + 1].trim() &&
+      !argv[i + 1].startsWith('--')
+    ) {
+      source = argv[i + 1];
+      i++;
+    } else if (argv[i] === '--allow-drop' && !allowDrop) {
+      allowDrop = true;
+    } else {
+      console.error(usage);
+      return 2;
+    }
+  }
+  if (source === null) {
+    console.error(usage);
     return 2;
   }
   const cache = readCache({ root });
@@ -792,12 +857,36 @@ function writeBaseline(argv, { root, log, now, readCache, readStore }) {
     console.error(`${LOG_PREFIX} write-baseline: no own record of ${BASELINE_MIN_MS} ms or more; ${BASELINE_FILE} not written`);
     return 1;
   }
+  const current = readBaseline({ root });
+  // #4640 P3-1: a baseline that reads neither ok nor missing has no paths to
+  // compare against (a corrupt file is an empty Map), so the count of dropped
+  // paths would be 0 and a partial worktree would overwrite it silently.
+  if (current.status !== 'ok' && current.status !== 'missing' && !allowDrop) {
+    console.error(
+      `${LOG_PREFIX} write-baseline: the current ${BASELINE_FILE} is ${current.status}${current.error ? ` (${current.error})` : ''}; not written (--allow-drop writes it)`
+    );
+    return 1;
+  }
+  // #4640: a baseline path this write would lose, whose file is still there.
+  const written = new Set(keys);
+  const dropped = [...current.durations.keys()]
+    .filter((rel) => !written.has(rel) && fs.existsSync(path.join(root, rel)))
+    .sort();
+  if (dropped.length > 0 && !allowDrop) {
+    for (const rel of dropped) {
+      console.error(`${LOG_PREFIX} write-baseline: would drop ${rel}, still in the repository`);
+    }
+    console.error(
+      `${LOG_PREFIX} write-baseline: ${dropped.length} path(s) would be dropped; ${BASELINE_FILE} not written (--allow-drop writes it)`
+    );
+    return 1;
+  }
   const d = now();
   const measuredAt = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const body = {
     version: BASELINE_VERSION,
     measuredAt,
-    source: argv[1],
+    source,
     durations: Object.fromEntries(keys.map((rel) => [rel, Math.round(/** @type {number} */ (own.get(rel)))])),
   };
   const file = path.join(root, BASELINE_FILE);
@@ -825,7 +914,7 @@ function writeBaseline(argv, { root, log, now, readCache, readStore }) {
  * exit 0: every group exited 0 and ran exactly the files it was given.
  * exit 1: any group non-zero, signalled, unspawnable, or ran a different set.
  * exit 2: usage error, or the changed files / the related set could not be collected.
- * `--write-baseline --source <text>` writes the durations baseline instead (see writeBaseline).
+ * `--write-baseline --source <text> [--allow-drop]` writes the durations baseline instead (see writeBaseline).
  *
  * @param {string[]} argv
  * @param {{
@@ -874,7 +963,7 @@ export async function main(argv, deps = {}) {
   const mkdtemp = deps.mkdtemp ?? ((/** @type {string} */ prefix) => fs.mkdtempSync(prefix));
 
   if (Array.isArray(argv) && argv[0] === '--write-baseline') {
-    return writeBaseline(argv.slice(1), { root, log, now: deps.now ?? (() => new Date()), readCache, readStore });
+    return writeBaseline(argv.slice(1), { root, log, now: deps.now ?? (() => new Date()), readCache, readStore, readBaseline });
   }
 
   if (!(Array.isArray(argv) && argv.length === 2 && argv[0] === '--base' && argv[1])) {
@@ -948,7 +1037,9 @@ export async function main(argv, deps = {}) {
     peers.peers,
     baseline.durations
   );
-  const plan = split(union.files, merged.durations, maxGroups);
+  // #4640: with only the baseline to weigh by, the light files weigh
+  // NO_RECORD_DEFAULT_MS instead of the baseline's median (see splitOptionsFor).
+  const plan = split(union.files, merged.durations, maxGroups, splitOptionsFor(merged));
   const n = plan.groups.length;
   log(
     `${LOG_PREFIX} split=lpt groups=${n} cache=${cache.status} known=${plan.known}/${union.files.length} default-weight=${Math.round(plan.defaultWeight)}ms`

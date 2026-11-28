@@ -104,6 +104,7 @@ import { dirtyPaths } from './dirty-tree.mjs';
 import { resolveInstanceThroughCli } from './resolve-instance.mjs';
 import { allocateLog, claimLog, executionKey, itemProblem, workItemName } from './execution-key.mjs';
 import { diffManifest, manifestHash, takeManifest } from './env-manifest.mjs';
+import { heavyWaiter } from './heavy-runs.mjs';
 
 export const DEFAULT_TIMEOUT_SEC = 10800;
 export const DEFAULT_SIGNAL_TIMEOUT_SEC = 1800;
@@ -1084,9 +1085,11 @@ export function runVerify(ctx, args, logFile) {
  *
  * @returns {{ exitCode: number, log: string, notes: string[], superseded: string | null }}
  */
-function runVerifyOnce({ spawnToLog, run, sleep, now, o, cwd, supersededBy, onVerifyStart, error }, args, logFile) {
+function runVerifyOnce({ spawnToLog, run, sleep, now, o, cwd, supersededBy, onVerifyStart, waitHeavy, error }, args, logFile) {
   const notes = [];
   for (let attempt = 1; ; attempt++) {
+    // No other heavy run on the machine before this one starts (#4631; heavy-runs.mjs, given only by the entry).
+    waitHeavy?.();
     // The environment this verification starts in (#3883 H-8).
     onVerifyStart?.();
     const exitCode = spawnToLog(o.cli, args, { cwd, logFile });
@@ -1303,6 +1306,7 @@ export function parseArgs(argv) {
  *   home?: string,
  *   log?: (line: string) => void,
  *   error?: (line: string) => void,
+ *   waitHeavy?: () => void,   before each `verify` starts (#4631); only the entry gives the real one
  * }} [deps]
  * @returns {number} exit code
  */
@@ -1437,7 +1441,7 @@ export function main(argv, deps = {}) {
     /** The runs before it that a mutex wait sent back (#3938): their waits count in the record's split. */
     let verifyEarlier = [];
     const verifyCtx = {
-      spawnToLog, run, sleep, now, o, cwd, supersededBy, error,
+      spawnToLog, run, sleep, now, o, cwd, supersededBy, error, waitHeavy: deps.waitHeavy,
       onVerifyStart: () => {
         env.verify = manifest();
       },
@@ -1628,5 +1632,5 @@ if (isMain) {
   // First on stderr when this checkout is behind origin/develop (#4574 N-V).
   const stale = staleCheckoutWarning(path.dirname(fileURLToPath(import.meta.url)), { tool: 'wait-verify.mjs' });
   if (stale) console.error(stale);
-  process.exit(main(process.argv.slice(2)));
+  process.exit(main(process.argv.slice(2), { waitHeavy: heavyWaiter({ label: 'wait-verify' }) }));
 }
