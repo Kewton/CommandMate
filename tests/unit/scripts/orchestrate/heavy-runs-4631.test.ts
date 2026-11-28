@@ -29,7 +29,7 @@ import { main as waitVerifyMain } from '../../../../scripts/orchestrate/wait-ver
 import { HEAVY_TEST_FILES, main as precheckMain } from '../../../../scripts/orchestrate/precheck.mjs';
 import { LAST_REQUIRED_CHECKS, main as mergePrMain } from '../../../../scripts/orchestrate/merge-pr.mjs';
 import { main as mergeTrainMain } from '../../../../scripts/orchestrate/merge-train.mjs';
-import { HEAD_A, HEAD_B, fakeGit, openPr } from './pr-fake';
+import { HEAD_A, fakeGit, openPr } from './pr-fake';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
 const FIXTURE = path.join(REPO_ROOT, 'tests/fixtures/heavy-runs-4631/ps-table-a.txt');
@@ -631,11 +631,11 @@ describe('表 B: merge-pr waits before its inner precheck (重なり: develop �
     return { code, events, runDir };
   }
 
-  function recordWork(runDir: string, precheckHead: string) {
+  function recordWork(runDir: string, precheckHead: string, precheckResult: 'ok' | 'fail' = 'ok') {
     appendRecord(runDir, '3477', { issue: 3477, stage: 'verify', result: 'ok', head: HEAD_A, note: 'exit=0(passed) passed=lint,typecheck failed=-' });
     appendRecord(runDir, '3477', { issue: 3477, stage: 'review', result: 'ok', head: HEAD_A });
     appendRecord(runDir, '3477', { issue: 3477, stage: 'findings', result: 'ok', head: HEAD_A });
-    appendRecord(runDir, '3477', { issue: 3477, stage: 'precheck', result: 'ok', head: precheckHead, note: `tsc=ok tests=ok ${OPTS}` });
+    appendRecord(runDir, '3477', { issue: 3477, stage: 'precheck', result: precheckResult, head: precheckHead, note: `tsc=${precheckResult} tests=ok ${OPTS}` });
   }
 
   it('the precheck after develop moved (the refresh) — positive control', () => {
@@ -646,7 +646,8 @@ describe('表 B: merge-pr waits before its inner precheck (重なり: develop �
   });
 
   it('the precheck of a HEAD that has none yet (no refresh)', () => {
-    recordWork(path.join(tmp, 'runs', '2026-11-27'), HEAD_B);
+    // No passed precheck of this HEAD: the work HEAD's own (failed) tool line gives the options (#4617 run-log.mjs precheckFor).
+    recordWork(path.join(tmp, 'runs', '2026-11-27'), HEAD_A, 'fail');
     const r = runMerge(fakeGit({ prs: [openPr()] }));
     expect(r.code).toBe(1);
     expect(r.events).toEqual(['heavy', 'precheck']);
