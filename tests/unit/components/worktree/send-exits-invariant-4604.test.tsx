@@ -166,9 +166,11 @@ function checkPost(to: Target, content: string) {
     if (!content.includes(piece.text)) continue;
     if (piece.tagId === null && piece.generation === null) continue;
     if (piece.original !== null && sameTo(piece.original, to)) continue;
-    // The piece was shown by the question (its text on screen then), and its mark too: its id, or
-    // the "unknown" it is under (by the generation the question saw, or — a generation written back
-    // in its place — by the piece being on screen under an "unknown" the question saw).
+    // The piece was shown by the question (its text on screen then — `yes.texts`), and its mark too: its
+    // id, or the "unknown" it is under. S13 t4b: `noteQuestion` adds to `yes.seen` the generation of every
+    // piece under an "unknown" on screen when the monitor saw the question shown, so for such a piece the
+    // generation clause holds whenever `yes.texts` does — a yes covers what its question showed, text and To
+    // (review r2 P3-4: the clause names nothing more on its own).
     const covered = oracle.yeses.some(
       (yes) =>
         yes.key === oracle.key &&
