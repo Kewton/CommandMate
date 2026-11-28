@@ -546,6 +546,10 @@ export function nextRetarget(
       if (prev.kind === 'unknown') {
         const tags = mergeRetargetTags(prev.tags, op.tags);
         if (unstorable !== null && unstorable !== prev.generation) {
+          // #4616 (review r2 P2-1): a write-back of the marks a composer holds keeps the store's generation and
+          // puts this page's mark into it (it goes once written) — else each save would turn the generation
+          // over and another tab's yes would never cover. A tag that comes in (`add`) takes a new one.
+          if (op.kind === 'writeBack') return keep({ kind: 'unknown', generation: prev.generation, tags }, true);
           return keep({ kind: 'unknown', generation: newGeneration(), tags });
         }
         return keep({ kind: 'unknown', generation: prev.generation, tags }, unstorable === prev.generation);

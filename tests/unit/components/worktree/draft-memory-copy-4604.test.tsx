@@ -51,6 +51,7 @@ import {
   moveDraft,
   newRetargetTag,
   readRetargetStore,
+  readRetargetUnstorable,
   returnRetargetedText,
   type RetargetTag,
 } from '@/lib/drafts/message-draft';
@@ -1020,6 +1021,67 @@ describe('[#4604 S13 t5 読み直しの陽性対照] the read again holds nothin
       expect({ i2: r.i2, i3: r.i3, i4: r.i4 }).toEqual({ i2: [], i3: [], i4: [] });
     }, RACE_TIMEOUT_MS);
   }
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * #4604 S13 t6 (review-4604-s13-r2.md P2-1, #4616 の形の残り): a store that is not full, this page's mark
+ * (left by an earlier full store) and the store's "unknown" of another generation — another tab wrote its
+ * "unknown" first. Tab a then types and saves again and again: its write-backs keep the store's generation
+ * (and this page's mark goes into it), so b's yes to its question still covers — POST 1.
+ * ---------------------------------------------------------------------------------------------- */
+
+describe('[#4616 満杯でない入口] this page\'s mark ≠ the store\'s "unknown": a\'s saves do not turn the generation over', () => {
+  it('a\'s 409 leaves this page\'s mark (full); room comes back; another tab writes "unknown" g1; a saves, b asks, a saves again — the generation stays and b\'s yes sends once', async () => {
+    let full = true;
+    takeLedger({ refuse: () => full });
+    const a = mount('a');
+    await settle('a');
+    type(a, FENCED);
+    await settle('a');
+    sendMessageMock.mockRejectedValueOnce(fence());
+    enter(a);
+    await settle('a', 30);
+    expect(posts()).toBe(1);
+    defaultSend(); // the count starts again: the yes below is POST 1
+    // Nothing could be stored: this page holds the mark.
+    expect(raw.get(getDraftValueKey(K))).toBeNull();
+    expect(readRetargetUnstorable(K)).not.toBeNull();
+    full = false;
+    const b = mount('b');
+    await settle('b');
+    // Another tab writes its "unknown" first (before a's save puts this page's mark in).
+    ledger.as('probe', () => window.localStorage.setItem(getDraftValueKey(K), draftValue({ text: 'words of another tab', unknown: SEED_GENERATION })));
+    await ledger.deliver();
+    const generation = () => (readRetargetStore(K) as { generation?: string }).generation ?? null;
+    type(a, `${FENCED} 1`);
+    await settle('a');
+    expect(ledger.fireSaves('a')).toBe(1);
+    await settle('a');
+    await ledger.deliver();
+    const afterFirst = generation();
+    type(b, 'hi b');
+    await settle('b');
+    enter(b);
+    await settle('b', 30);
+    expect(band(b)).not.toBeNull();
+    // Between the question and the yes: a types and saves again.
+    type(a, `${FENCED} 2`);
+    await settle('a');
+    expect(ledger.fireSaves('a')).toBe(1);
+    await settle('a');
+    await ledger.deliver();
+    const afterSecond = generation();
+    ledger.as('b', () => act(() => {
+      yesButton(b).click();
+    }));
+    await settle('b', 30);
+    expect({
+      generations: [afterFirst, afterSecond],
+      pageMark: readRetargetUnstorable(K),
+      posts: posts(),
+      asksAgain: band(b) !== null,
+    }).toEqual({ generations: [SEED_GENERATION, SEED_GENERATION], pageMark: null, posts: 1, asksAgain: false });
+  }, RACE_TIMEOUT_MS);
 });
 
 /* ------------------------------------------------------------------------------------------------
