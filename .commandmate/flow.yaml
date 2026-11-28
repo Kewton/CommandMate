@@ -20,3 +20,12 @@ relayWatch:
   pendingMinutes: 60
   screenMinutes: 20
   notifyNoRelay: false
+# milestone (#4642, docs/design/milestone-check-4642.md §4): the current Sprint, written by name.
+# `node scripts/orchestrate/milestone-check.mjs check` never infers it (I4); it is moved by the PM
+# in the same step as the Milestone itself when a plan change is approved. roadmapIssue is the
+# Issue whose last comment records moves (M6); mergedWindowDays is how many days of merged PRs
+# count as "just merged" (default 14).
+milestone:
+  current: "Sprint 13"
+  roadmapIssue: 4461
+  mergedWindowDays: 14

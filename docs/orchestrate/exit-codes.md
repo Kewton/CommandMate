@@ -178,6 +178,18 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
 
 precheck のうち全ファイルを走査するガードのテスト（`tests/unit/guards` の下）が `Test timed out in 5000ms` で落ちるのは、多くの場合マシンの負荷（同じマシンの CI ランナーなど）によるもので、作業とは関係しない。ワーカーへ再指示しない。すぐに再実行しても同じ負荷で落ちる。1 分の load average が論理 CPU 数の目安を下回るまで待ってから、同じ HEAD で precheck を再実行する。
 
+## 1-5 milestone-check の exit code
+
+`node scripts/orchestrate/milestone-check.mjs check|summary`（#4642 PR-1。docs/design/milestone-check-4642.md）の exit code。読み取り専用の助言で、何も止めない。強い順は **2 > 61 > 62 > 0**（判定できない入力が 1 つでもあれば、ずれがあっても 61）。
+
+| exit | 意味 | 対応 |
+|---|---|---|
+| 0 | ずれ無し（`summary` はずれがあっても 0） | なし |
+| 62 | ずれあり（`drift` の行がある） | 行の `detail`（worktree のパス・PR 番号・Milestone 名）を読み、Milestone・`milestone.current`・#4461 を同期する |
+| 61 | 判定できない（gh・git の失敗／時間切れ／`--limit` に当たって切れた／JSON が読めない） | `unknown[]` の読みを直して流し直す。**ずれ無しと読まない** |
+| 2 | 使い方・設定の誤り（`milestone.current` が無い・その Milestone が無い／closed・節の形） | `flow.yaml` の `milestone` を直す |
+| 1 | 想定外 | stderr の 1 行目 |
+
 ## 1-5 record-verify の exit code
 
 `run-log.mjs record-verify`（#4482。リーダーが直接流した verify を run 番号から記録する。docs/orchestrate/run-log.md）の exit code。0 以外は何も書かない。
