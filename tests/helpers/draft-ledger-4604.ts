@@ -166,6 +166,11 @@ export interface DraftLedgerOptions {
   tabs?: readonly Tab[];
   /** The composer's debounced save delay (the timers held for the test to fire). */
   saveDelayMs?: number;
+  /**
+   * A store that cannot be read: a `getItem` of a draft's key for which this is true throws (the read
+   * shape `throws`; #4604 S13 記憶の軸 A5). Asked at each read, so a test can turn it on and off.
+   */
+  readFault?: (key: string) => boolean;
 }
 
 /** G2: run another actor's whole operation just before the `at`-th write (0-based) of `outer`. */
@@ -365,7 +370,10 @@ export function installDraftLedger(options: DraftLedgerOptions): DraftLedger {
       write(this, 'removeItem', key, null);
     }),
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
-      if (draftOf(key) !== undefined) ledger.reads.push({ actor: ledger.actor, key });
+      if (draftOf(key) !== undefined) {
+        ledger.reads.push({ actor: ledger.actor, key });
+        if (options.readFault?.(key)) throw new DOMException('denied', 'SecurityError');
+      }
       return REAL_GET!.call(this, key);
     }),
     vi.spyOn(window, 'addEventListener').mockImplementation(((type: string, listener: EventListenerOrEventListenerObject | null, opts?: boolean | AddEventListenerOptions) => {
