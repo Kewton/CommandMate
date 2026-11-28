@@ -16,6 +16,7 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { vi } from 'vitest';
 import {
+  getDraftValueKey,
   getRetargetTagKey,
   getSplitDraftKey,
   readRetargetStore,
@@ -27,7 +28,7 @@ import {
   writeRetarget,
   type RetargetTag,
 } from '@/lib/drafts/message-draft';
-import { installStoreFaults, isDraftTextKey, isRetargetKey, rawStore } from '@tests/helpers/draft-store-fault-4604';
+import { installStoreFaults, isDraftTextKey, isDraftValueKey, isRetargetKey, rawStore, shortValueLength, storedDraft } from '@tests/helpers/draft-store-fault-4604';
 
 const KEY = getSplitDraftKey('wt-4604-road', 0);
 const TAG_KEY = getRetargetTagKey(KEY);
@@ -74,7 +75,8 @@ describe('[#4604] writeRetarget: the steps', () => {
   it('a readable store takes the tags as a list (merged, by id)', () => {
     expect(writeRetarget(KEY, { kind: 'add', tags: [T1] })).toBe('stored');
     expect(writeRetarget(KEY, { kind: 'writeBack', tags: [T1, T2] })).toBe('stored');
-    expect(JSON.parse(rawStore().get(TAG_KEY)!)).toEqual([T1, T2]);
+    // Issue #4604 S13: the marks are read from the draft's one value.
+    expect(readRetargetStore(KEY)).toEqual({ kind: 'list', tags: [T1, T2] });
   });
 
   it('V2-A: a store whose getItem throws is not written over with a list — it becomes "unknown" with the new tag', () => {
@@ -95,23 +97,24 @@ describe('[#4604] writeRetarget: the steps', () => {
   });
 
   it('a list that cannot be written (a full store) leaves the short "unknown"', () => {
-    installStoreFaults([{ method: 'setItem', key: isRetargetKey, overBytes: 60 }]);
+    // Issue #4604 S13: a full store refuses the draft's value with the tag; its short value fits.
+    installStoreFaults([{ method: 'setItem', key: isDraftValueKey, overBytes: shortValueLength('') }]);
     expect(writeRetarget(KEY, { kind: 'add', tags: [T1] })).toBe('unknown-stored');
-    const raw = JSON.parse(rawStore().get(TAG_KEY)!);
-    expect(raw.tags).toEqual([]);
-    expect(typeof raw.unknown).toBe('string');
+    const read = readRetargetStore(KEY);
+    expect(read.kind === 'unknown' && read.tags).toEqual([]);
+    expect(read.kind === 'unknown' && typeof read.generation).toBe('string');
     expect(readRetargetUnstorable(KEY)).toBeNull();
   });
 
   it('nothing goes in: this page keeps the mark (a generation, no tag), and its sends ask', () => {
-    installStoreFaults([{ method: 'setItem', key: isRetargetKey }]);
+    installStoreFaults([{ method: 'setItem', key: isDraftValueKey }]);
     expect(writeRetarget(KEY, { kind: 'add', tags: [T1] })).toBe('unstored');
-    expect(rawStore().get(TAG_KEY)).toBeNull();
+    expect(rawStore().get(getDraftValueKey(KEY))).toBeNull();
     expect(readRetargetUnstorable(KEY)).toEqual(expect.any(String));
   });
 
   it('N-1: a later list write that goes in does not drop the mark — it goes in as that generation\'s "unknown"', () => {
-    const faults = installStoreFaults([{ method: 'setItem', key: isRetargetKey }]);
+    const faults = installStoreFaults([{ method: 'setItem', key: isDraftValueKey }]);
     writeRetarget(KEY, { kind: 'add', tags: [T1] });
     const generation = readRetargetUnstorable(KEY);
     faults.restore();
@@ -152,7 +155,7 @@ describe('[#4604] release: only what the question saw (N-7・N-11)', () => {
   });
 
   it('N-11: a release with no ids lets go of the page mark its question saw (and only that generation)', () => {
-    const faults = installStoreFaults([{ method: 'setItem', key: isRetargetKey }]);
+    const faults = installStoreFaults([{ method: 'setItem', key: isDraftValueKey }]);
     writeRetarget(KEY, { kind: 'add', tags: [T1] });
     faults.restore();
     const generation = readRetargetUnstorable(KEY)!;
@@ -165,20 +168,20 @@ describe('[#4604] release: only what the question saw (N-7・N-11)', () => {
 
 describe('[#4604] returnRetargetedText through the road', () => {
   it('a tag stored only as "unknown" (a full store) still hands the text back — every send of it asks', () => {
-    installStoreFaults([{ method: 'setItem', key: isRetargetKey, overBytes: 60 }]);
+    installStoreFaults([{ method: 'setItem', key: isDraftValueKey, overBytes: shortValueLength('please look') }]);
     const heard = vi.fn();
     const off = subscribeRetargetedText(KEY, heard);
     expect(returnRetargetedText(KEY, { text: 'please look', tag: T1 })).toBe(true);
     off();
     expect(heard).toHaveBeenCalledTimes(1);
-    expect(rawStore().get(KEY)).toBe('please look');
+    expect(storedDraft(KEY).text).toBe('please look');
     expect(readRetargetTagState(KEY).known).toBe(false);
   });
 
   it('nothing stored: nothing handed back, and nothing marked on the page (there is no text)', () => {
-    installStoreFaults([{ method: 'setItem', key: isRetargetKey }]);
+    installStoreFaults([{ method: 'setItem', key: isDraftValueKey }]);
     expect(returnRetargetedText(KEY, { text: 'please look', tag: T1 })).toBe(false);
-    expect(rawStore().get(KEY)).toBeNull();
+    expect(rawStore().get(getDraftValueKey(KEY))).toBeNull();
     expect(readRetargetUnstorable(KEY)).toBeNull();
   });
 
@@ -186,13 +189,15 @@ describe('[#4604] returnRetargetedText through the road', () => {
     rawStore().set(TAG_KEY, JSON.stringify([T2]));
     installStoreFaults([{ method: 'setItem', key: isDraftTextKey }]);
     expect(returnRetargetedText(KEY, { text: 'please look', tag: T1 })).toBe(false);
-    expect(JSON.parse(rawStore().get(TAG_KEY)!)).toEqual([T2, T1]);
+    // Issue #4604 S13 (ウ): the text and its tag are one write — the store keeps what it held (the tag
+    // already there), and the new tag does not go in without its text.
+    expect(readRetargetStore(KEY)).toEqual({ kind: 'list', tags: [T2] });
   });
 
   it('(negative control) a working store: the tag as a list, the text appended — as before', () => {
     rawStore().set(KEY, 'typed');
     expect(returnRetargetedText(KEY, { text: 'please look', tag: T1 })).toBe(true);
     expect(readRetargetTags(KEY)).toEqual([T1]);
-    expect(rawStore().get(KEY)).toBe('typed\n\nplease look');
+    expect(storedDraft(KEY).text).toBe('typed\n\nplease look');
   });
 });

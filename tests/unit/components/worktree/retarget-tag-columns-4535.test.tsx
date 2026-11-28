@@ -128,6 +128,7 @@ import { ToastProvider } from '@/components/common/Toast';
 import { TerminalSplitPaneContent } from '@/components/worktree/TerminalSplitPaneContent';
 import { MobileTerminalTab } from '@/components/worktree/MobileTerminalTab';
 import { MessageInput } from '@/components/worktree/MessageInput';
+import { storedDraft } from '@tests/helpers/draft-store-fault-4604';
 import { WorktreeChatSendProvider, useChatOptimisticSend } from '@/contexts/WorktreeChatSendContext';
 
 const WT = 'wt-4535-tags';
@@ -435,8 +436,9 @@ class Run {
 
 /** The tags stored next to a draft (`<draftKey>:retarget`). */
 function storedTags(draftKey: string): Array<{ id: string; original: { instanceId: string; cliToolId: string } }> {
-  const raw = window.localStorage.getItem(`${draftKey}:retarget`);
-  return raw ? JSON.parse(raw) : [];
+  // Issue #4604 S13: the tags are in the draft's one value (read with the lib's public read).
+  const marks = storedDraft(draftKey).marks;
+  return marks.kind === 'list' || marks.kind === 'unknown' ? marks.tags : [];
 }
 const splitKey = (i: number) => `commandmate:draft-message:${WT}:${i}`;
 
@@ -538,9 +540,9 @@ describe('[#4535 r7 INV-V2b] PC: another tab, a reload, many texts back', () => 
     });
     await waitFor(() => expect(posts).toHaveLength(before + 1));
     await flush(30);
-    // What the other tab wrote reaches this tab as a `storage` event.
+    // What the other tab wrote reaches this tab as a `storage` event (Issue #4604 S13: the draft's one value).
     act(() => {
-      window.dispatchEvent(new StorageEvent('storage', { key: `${splitKey(0)}:retarget` }));
+      window.dispatchEvent(new StorageEvent('storage', { key: `${splitKey(0)}:value` }));
       window.dispatchEvent(new StorageEvent('storage', { key: splitKey(0) }));
     });
     otherTab.unmount();

@@ -62,7 +62,7 @@ vi.mock('@/lib/handoff/screen-client', async (importOriginal) => {
 import { SessionTile } from '@/components/sessions/SessionTile';
 import { ToastProvider } from '@/components/common/Toast';
 import { resetRevealedStartingTerminals } from '@/hooks/useSessionStartingGate';
-import { getInstanceDraftKey, getRetargetTagKey } from '@/lib/drafts/message-draft';
+import { getInstanceDraftKey, readDraft, readRetargetStore } from '@/lib/drafts/message-draft';
 import type { Worktree } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
@@ -181,7 +181,8 @@ async function arrange(refusal: string | null, after: Roster) {
   await waitFor(() => expect(ta('A')).toBeInTheDocument());
   fireEvent.change(ta('A'), { target: { value: TEXT } });
   await flush(600);
-  expect(window.localStorage.getItem(getInstanceDraftKey(WT, I1.id))).toBe(TEXT);
+  // Issue #4604 S13: the draft is its one value (read with the lib's public read).
+  expect(readDraft(getInstanceDraftKey(WT, I1.id)).text).toBe(TEXT);
   shown = { ...shown, B: 'codex-2' };
   view.rerender(tree());
   await flush(30);
@@ -199,7 +200,7 @@ async function arrange(refusal: string | null, after: Roster) {
     })));
     await flush(50);
     expect(ta('A').value).toBe(TEXT);
-    expect(window.localStorage.getItem(getRetargetTagKey(getInstanceDraftKey(WT, I1.id)))).not.toBeNull();
+    expect(readRetargetStore(getInstanceDraftKey(WT, I1.id)).kind).not.toBe('absent');
   }
   roster = after;
   view.rerender(tree());

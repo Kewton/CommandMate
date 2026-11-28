@@ -79,7 +79,8 @@ vi.mock('@/components/providers/WorktreesCacheProvider', async (importOriginal) 
 import { SessionTile } from '@/components/sessions/SessionTile';
 import { ToastProvider } from '@/components/common/Toast';
 import { resetRevealedStartingTerminals } from '@/hooks/useSessionStartingGate';
-import { getInstanceDraftKey, getRetargetTagKey } from '@/lib/drafts/message-draft';
+import { getDraftValueKey, getInstanceDraftKey, readRetargetStore } from '@/lib/drafts/message-draft';
+import { storedDraft } from '@tests/helpers/draft-store-fault-4604';
 import { applyWaitingEdge, useWorktreesCache } from '@/hooks/useWorktreesCache';
 import type { Worktree } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -455,7 +456,8 @@ describe('[#4606 Q2] the shown instance leaves the roster and the tile falls bac
     await readRoster({ claude: 'claude' });
     await flush(50);
     expect(ta().value).toBe(`already for claude\n\n${TEXT}`);
-    expect(window.localStorage.getItem(getInstanceDraftKey(WT, 'codex-2'))).toBeNull();
+    // Issue #4604 S13: the moved draft's text went from its one value.
+    expect(storedDraft(getInstanceDraftKey(WT, 'codex-2')).text).toBe('');
     expect(await enterOnce()).toBe(0);
     expect(scope().queryByTestId('message-input-retarget-confirm')).not.toBeNull();
   });
@@ -472,7 +474,7 @@ describe('[#4606 Q2] the shown instance leaves the roster and the tile falls bac
     view.rerender(tree());
     await flush(30);
     expect(ta().value).toBe('');
-    expect(window.localStorage.getItem(getInstanceDraftKey(WT, 'codex-2'))).toBe(TEXT);
+    expect(storedDraft(getInstanceDraftKey(WT, 'codex-2')).text).toBe(TEXT);
   });
 });
 
@@ -491,7 +493,8 @@ describe('[#4606 r3 P1-6] the move to the fallback after the composer\'s waiting
     await waitFor(() => expect(ta()).toBeInTheDocument());
     fireEvent.change(ta(), { target: { value: text } });
     await flush(600);
-    expect(window.localStorage.getItem(KX)).toBe(text);
+    // Issue #4604 S13: the draft is its one value (read with the lib's public read).
+    expect(storedDraft(KX).text).toBe(text);
   }
 
   it.each([
@@ -505,8 +508,8 @@ describe('[#4606 r3 P1-6] the move to the fallback after the composer\'s waiting
     await readRoster({ claude: 'claude' });
     await flush(600);
     expect(ta().value).toBe(latest);
-    expect(window.localStorage.getItem(KX)).toBeNull();
-    expect(window.localStorage.getItem(KY) ?? '').toBe(latest);
+    expect(storedDraft(KX).text).toBe('');
+    expect(storedDraft(KY).text).toBe(latest);
   });
 
   it('(control) rewritten, 600 ms, then X leaves: Y gets the rewritten text', async () => {
@@ -517,23 +520,25 @@ describe('[#4606 r3 P1-6] the move to the fallback after the composer\'s waiting
     await readRoster({ claude: 'claude' });
     await flush(600);
     expect(ta().value).toBe('新本文');
-    expect(window.localStorage.getItem(KX)).toBeNull();
+    expect(storedDraft(KX).text).toBe('');
   });
 
   it('the move cannot write Y\'s text: a toast says so, and X keeps its text and marks', async () => {
     await showXWithSaved('旧本文');
     const realSet = Storage.prototype.setItem;
+    // Issue #4604 S13: Y's one value cannot be written.
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
-      if (key === KY) throw new DOMException('full', 'QuotaExceededError');
+      if (key === getDraftValueKey(KY)) throw new DOMException('full', 'QuotaExceededError');
       return realSet.call(this, key, value);
     });
     shownId = null;
     await readRoster({ claude: 'claude' });
     await flush(600);
     expect(screen.getByText('下書きを移せませんでした。元のインスタンスの下書きに残っています。')).toBeInTheDocument();
-    expect(window.localStorage.getItem(KX)).toBe('旧本文');
-    // Its marks went in to Y before the text failed (marks first): Y asks before it sends anything of it.
-    expect(window.localStorage.getItem(getRetargetTagKey(KY))).not.toBeNull();
+    expect(storedDraft(KX).text).toBe('旧本文');
+    // The marks and the text are one write (S13, ウ): nothing went in to Y — it is as it was, no mark.
+    expect(readRetargetStore(KY)).toEqual({ kind: 'absent' });
+    expect(storedDraft(KY).text).toBe('');
   });
 });
 
@@ -776,7 +781,8 @@ describe('[#4606 r4 P1-6] X\'s waiting save fails at the switch', () => {
     await waitFor(() => expect(ta()).toBeInTheDocument());
     fireEvent.change(ta(), { target: { value: text } });
     await flush(600);
-    expect(window.localStorage.getItem(KX)).toBe(text);
+    // Issue #4604 S13: the draft is its one value (read with the lib's public read).
+    expect(storedDraft(KX).text).toBe(text);
   }
 
   it('rewritten, and X\'s `setItem` throws: Y does not get the old text; a toast says it was not moved', async () => {
@@ -784,15 +790,16 @@ describe('[#4606 r4 P1-6] X\'s waiting save fails at the switch', () => {
     fireEvent.change(ta(), { target: { value: '新本文' } });
     await flush(50);
     const realSet = Storage.prototype.setItem;
+    // Issue #4604 S13: X's one value cannot be written.
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
-      if (key === KX) throw new DOMException('full', 'QuotaExceededError');
+      if (key === getDraftValueKey(KX)) throw new DOMException('full', 'QuotaExceededError');
       return realSet.call(this, key, value);
     });
     shownId = null;
     await readRoster({ claude: 'claude' });
     await flush(600);
     expect(ta().value).not.toContain('旧本文');
-    expect(window.localStorage.getItem(KY) ?? '').not.toContain('旧本文');
+    expect(storedDraft(KY).text).not.toContain('旧本文');
     expect(screen.getByText('下書きを移せませんでした。元のインスタンスの下書きに残っています。')).toBeInTheDocument();
   });
 
@@ -803,7 +810,7 @@ describe('[#4606 r4 P1-6] X\'s waiting save fails at the switch', () => {
     const realRemove = Storage.prototype.removeItem;
     let thrown = false;
     vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, key: string) {
-      if (key === KX && !thrown) {
+      if (key === getDraftValueKey(KX) && !thrown) {
         thrown = true;
         throw new DOMException('denied', 'SecurityError');
       }
@@ -813,6 +820,6 @@ describe('[#4606 r4 P1-6] X\'s waiting save fails at the switch', () => {
     await readRoster({ claude: 'claude' });
     await flush(600);
     expect(ta().value).not.toContain('旧本文');
-    expect(window.localStorage.getItem(KY) ?? '').not.toContain('旧本文');
+    expect(storedDraft(KY).text).not.toContain('旧本文');
   });
 });

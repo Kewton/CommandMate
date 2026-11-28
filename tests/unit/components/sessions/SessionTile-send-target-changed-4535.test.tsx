@@ -211,7 +211,8 @@ describe('[#4535 T19b] the /sessions tile: the text back, and no one-press send 
     await sendThenRefuse({ id: 'codex-2', tool: 'codex' }, { id: 'claude', tool: 'claude' }, 'worktree-gone');
     await waitFor(() => expect(toastText()).toContain('worktree が無くなりました'));
     expect(textarea().value).toBe('');
-    expect(window.localStorage.getItem(`commandmate:draft-message:${WT}:instance:codex-2`)).toBeNull();
+    // Issue #4604 S13: nothing went into the draft's one value.
+    expect(window.localStorage.getItem(`commandmate:draft-message:${WT}:instance:codex-2:value`)).toBeNull();
     expect(window.localStorage.getItem(`commandmate:draft-message:${WT}:retarget-hold`)).toBeNull();
     expect(posts).toHaveLength(1);
   });

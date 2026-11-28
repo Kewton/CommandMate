@@ -43,7 +43,7 @@ vi.mock('@/lib/api-client', async (importOriginal) => {
 import { ApiError } from '@/lib/api-client';
 import { useOptimisticPaneMessages } from '@/hooks/useOptimisticPaneMessages';
 import { ToastProvider } from '@/components/common/Toast';
-import { getSplitDraftKey, readRetargetTags } from '@/lib/drafts/message-draft';
+import { getDraftValueKey, getSplitDraftKey, readRetargetTags } from '@/lib/drafts/message-draft';
 
 const WT = 'wt-4535';
 const TEXT = 'please look at the diff';
@@ -339,7 +339,8 @@ describe('[#4535 T19b r5] the discard, a hold that cannot be written, and the ho
     await flush();
     await waitFor(() => expect(toastText()).toContain('送っていません'));
     expect(onNotSent).not.toHaveBeenCalled();
-    expect(window.localStorage.getItem(DRAFT_KEY)).toBeNull();
+    // Issue #4604 S13: nothing went into the draft's one value.
+    expect(window.localStorage.getItem(getDraftValueKey(DRAFT_KEY))).toBeNull();
     expect(toastText()).toContain('本文を入力欄に戻せませんでした');
     // Nor on the discard: the hold still cannot be written.
     let discarded: string | undefined = 'x';

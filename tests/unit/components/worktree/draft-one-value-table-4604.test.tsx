@@ -501,32 +501,33 @@ async function enumerate(race: Race): Promise<{ n: number; m: number; orders: nu
  * ---------------------------------------------------------------------------------------------- */
 
 /**
- * The calls that write a draft's store (directly, or through a writer), per file — develop 0882e72e4.
- * Each is driven by a G1 row: `writeDraft`・`clearStoredDraft`・`clearSentDraft`・`releaseSentTags` (送信,
- * 遅らせた保存, 切り替え), `writeRetargetTold`・`writeRetarget` (409, 遅らせた保存, 切り替え, `storage` の
- * 書き戻し), `writeSendUnknownMark` (#4503 の印, 送信), `localStorage.*` in MessageInput (the legacy
- * key's migration — I1's one exception — and the writers above), `returnRetargetedText` (戻し),
- * `appendToStoredDraft` (追記), `moveDraft` (移動). The fix rewrites this table with its writers.
+ * The calls that write a draft's store (directly, or through a writer), per file — after the fix (#4604
+ * S13: one value). Each is driven by a G1 row: `writeRetarget` — the one road of the draft's value — called
+ * by the composer's `saveHeldDraft` through `writeRetargetTold` (遅らせた保存, 切り替え, 409), by
+ * `releaseSentTags` (送信, through `clearStoredDraft`・`clearSentDraft`), by the restore's migration of the
+ * keys of before (I1's one exception) and #728's legacy key's copy into split 0's value, and in the lib by `appendToStoredDraft` (追記), `returnRetargetedText`
+ * (戻し), `moveDraft` (移動 ×2), `releaseRetargetTags` and `writeSendUnknownMark` (#4503 の印);
+ * `storage.*` in the lib is the road's value write, its short value, its remove and the migration's removes
+ * of the keys of before; `localStorage.removeItem` in MessageInput is #728's legacy key going (another key).
+ * Before the fix (develop 0882e72e4) the table was: MessageInput `localStorage.setItem` 3・`removeItem` 3・
+ * `writeRetarget` 1・`writeSendUnknownMark` 4・`releaseRetargetTags` 1・`writeRetargetTold` 7・`writeDraft` 4・
+ * `clearStoredDraft` 2・`releaseSentTags` 3・`clearSentDraft` 2; message-draft `localStorage.setItem` 3・
+ * `writeRetarget` 3・`storage.removeItem` 1・`storage.setItem` 2・`localStorage.removeItem` 1.
  */
 const WRITE_POINTS: Record<string, Record<string, number>> = {
   'src/components/worktree/MessageInput.tsx': {
-    'localStorage.setItem': 3,
-    'localStorage.removeItem': 3,
-    writeRetarget: 1,
-    writeSendUnknownMark: 4,
-    releaseRetargetTags: 1,
-    writeRetargetTold: 7,
-    writeDraft: 4,
+    'localStorage.removeItem': 1,
+    writeRetarget: 4,
+    writeSendUnknownMark: 1,
+    writeRetargetTold: 2,
     clearStoredDraft: 2,
-    releaseSentTags: 3,
+    releaseSentTags: 2,
     clearSentDraft: 2,
   },
   'src/lib/drafts/message-draft.ts': {
-    'localStorage.setItem': 3,
-    writeRetarget: 3,
-    'storage.removeItem': 1,
+    writeRetarget: 6,
+    'storage.removeItem': 4,
     'storage.setItem': 2,
-    'localStorage.removeItem': 1,
   },
 };
 const WRITE_CALL = /(function\s+)?\b((?:window\.)?localStorage\.(?:setItem|removeItem)|storage\.(?:setItem|removeItem)|writeRetargetTold|writeRetarget|writeDraft|writeSendUnknownMark|releaseRetargetTags|releaseSentTags|clearStoredDraft|clearSentDraft|returnRetargetedText|appendToStoredDraft|moveDraft)\(/g;

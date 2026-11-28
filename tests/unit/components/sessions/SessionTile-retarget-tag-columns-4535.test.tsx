@@ -59,6 +59,7 @@ import { ToastProvider } from '@/components/common/Toast';
 import { resetRevealedStartingTerminals } from '@/hooks/useSessionStartingGate';
 import type { Worktree } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { storedDraft } from '@tests/helpers/draft-store-fault-4604';
 
 const WT = 'wt-1';
 const TEXT = 'please look at the diff';
@@ -280,8 +281,9 @@ class Run {
 }
 
 function storedTags(draftKey: string): Array<{ id: string; original: { instanceId: string; cliToolId: string } }> {
-  const raw = window.localStorage.getItem(`${draftKey}:retarget`);
-  return raw ? JSON.parse(raw) : [];
+  // Issue #4604 S13: the tags are in the draft's one value (read with the lib's public read).
+  const marks = storedDraft(draftKey).marks;
+  return marks.kind === 'list' || marks.kind === 'unknown' ? marks.tags : [];
 }
 const instanceKey = (instanceId: string) => `commandmate:draft-message:${WT}:instance:${instanceId}`;
 

@@ -85,9 +85,11 @@ import { ToastProvider } from '@/components/common/Toast';
 import { resetRevealedStartingTerminals } from '@/hooks/useSessionStartingGate';
 import { applyWaitingEdge, useWorktreesCache } from '@/hooks/useWorktreesCache';
 import {
+  getDraftValueKey,
   getRetargetTagKey,
   getSplitDraftKey,
   newRetargetTag,
+  readRetargetStore,
   readRetargetUnstorable,
   returnRetargetedText,
 } from '@/lib/drafts/message-draft';
@@ -166,22 +168,11 @@ function checkPost(to: Target, content: string) {
 
 /** What a question shown now shows: the ids and generations of the draft's marks (store and page mark). */
 function storeFacts(key: string): { ids: string[]; seen: string[] } {
-  const raw = window.localStorage.getItem(getRetargetTagKey(key));
-  const ids: string[] = [];
-  const seen: string[] = [];
-  if (raw !== null) {
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (Array.isArray(parsed)) ids.push(...parsed.map((t: { id: string }) => t.id));
-      else if (parsed && typeof parsed === 'object') {
-        const { unknown, tags } = parsed as { unknown?: string; tags?: Array<{ id: string }> };
-        if (typeof unknown === 'string') seen.push(unknown);
-        if (Array.isArray(tags)) ids.push(...tags.map((t) => t.id));
-      }
-    } catch {
-      /* junk: no ids, no generation — a yes to it covers nothing named */
-    }
-  }
+  // Issue #4604 S13: the marks are in the draft's one value (read with the lib's public read; junk: no
+  // ids, no generation — a yes to it covers nothing named).
+  const marks = readRetargetStore(key);
+  const ids: string[] = marks.kind === 'list' || marks.kind === 'unknown' ? marks.tags.map((t) => t.id) : [];
+  const seen: string[] = marks.kind === 'unknown' ? [marks.generation] : [];
   const mark = readRetargetUnstorable(key);
   if (mark !== null) seen.push(mark);
   return { ids, seen };
@@ -373,10 +364,17 @@ const pendingQuestions: Record<string, Yes | null> = {};
 function noteQuestion(name: string, to: Target) {
   expect(inComposer(name).getByTestId('message-input-retarget-confirm')).toBeInTheDocument();
   const onScreen = (inComposer(name).getByTestId('message-input-textarea') as HTMLTextAreaElement).value;
+  const facts = storeFacts(oracle.key);
+  // Issue #4604 S13: a composer also asks for the "unknown" it holds itself (the generation its restore
+  // read), once the store no longer says it (another composer's send let it go — nothing is written back
+  // from a `storage` event; its next save puts it back): its band says the marks cannot be checked, so the
+  // question shows an "unknown".
+  const band = inComposer(name).getByTestId('message-input-retarget-confirm').textContent ?? '';
+  if (facts.seen.length === 0 && band.includes('確かめられませんでした')) facts.seen.push('held-unknown');
   pendingQuestions[name] = {
     key: oracle.key,
     to,
-    ...storeFacts(oracle.key),
+    ...facts,
     texts: oracle.pieces.filter((piece) => onScreen.includes(piece.text)).map((piece) => piece.text),
   };
 }
@@ -477,7 +475,8 @@ describe('[#4604 T-P] composer exits × events (PC split pane)', () => {
       await flush(50);
       expect(oracle.posts).toHaveLength(1);
       await act(async () => {
-        window.dispatchEvent(new StorageEvent('storage', { key: getRetargetTagKey(KEY) }));
+        // Issue #4604 S13: the draft's one value is what another tab's write changes.
+        window.dispatchEvent(new StorageEvent('storage', { key: getDraftValueKey(KEY) }));
         window.dispatchEvent(new StorageEvent('storage', { key: KEY }));
       });
       await flush(30);

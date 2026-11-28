@@ -3,19 +3,23 @@
  * #4604 tests.
  *
  * - {@link installStoreFaults}: `localStorage`'s `getItem` / `setItem` / `removeItem` throw for the keys
- *   a rule picks (the draft's `:retarget` key, its text key, any), always, from the n-th call, for n
- *   calls only, or only for a value longer than N bytes (a full store that still takes a short value).
+ *   a rule picks (the draft's value key `<K>:value` — Issue #4604 S13 —, the keys of before, any),
+ *   always, from the n-th call, for n calls only, or only for a value longer than N bytes (a full store
+ *   that still takes a short value: {@link shortValueLength}).
  * - {@link otherTabWrites}: another tab — the store alone is written (never a second render in this
  *   document) and a `StorageEvent` is dispatched, as a browser does in the other documents.
+ *   {@link otherTabWritesDraft}: another tab writes a draft's one value (S13).
  * - {@link MemoryRetargetStorage}: an in-memory store for the road's pure tests, with the model's
- *   failures (`none` · `rThrow` · `wAll` · `wShort` · `wBody` · `rmThrow`).
+ *   failures (`none` · `rThrow` · `wAll` · `wShort` · `wBody` · `rmThrow`). S13: it keeps a draft's marks
+ *   in the shape of before (`<K>:retarget`, a list or `{"unknown":…,"tags":[…]}`) and shows them to the
+ *   road as the draft's value (`<K>:value`), so the pure tests read and seed the marks as they did.
  * - {@link createPostOracle}: every POST is judged by one rule (案 A'): (i) the text's tag names the
  *   POST's To, or (ii) the POST's To is the To the question the person last said yes to named, and
  *   the yes covered what the text was (the ids and generations its question saw).
  */
 import { vi } from 'vitest';
 import * as draftModule from '@/lib/drafts/message-draft';
-import { getRetargetTagKey } from '@/lib/drafts/message-draft';
+import { getDraftValueKey, readDraft, type RetargetTag } from '@/lib/drafts/message-draft';
 
 export type StoreMethod = 'getItem' | 'setItem' | 'removeItem';
 
@@ -28,11 +32,59 @@ export interface StoreFaultRule {
   when?: 'always' | { from: number } | { times: number };
   /** `setItem` only: throw only when the value is longer than this many characters. */
   overBytes?: number;
+  /** Issue #4604 S13: `setItem` only — throw only for a value this is true of (e.g. {@link carriesMark}). */
+  value?: (value: string) => boolean;
 }
 
 export const isRetargetKey = (key: string): boolean => key.endsWith(':retarget');
 export const isDraftTextKey = (key: string): boolean =>
   key.startsWith('commandmate:draft-message:') && !key.endsWith(':retarget') && !key.endsWith(':send-unknown');
+/** Issue #4604 S13: a draft's one value (`<K>:value`) — its text and its marks. */
+export const isDraftValueKey = (key: string): boolean => key.startsWith('commandmate:draft-message:') && key.endsWith(':value');
+
+/** The longest generation the lib makes (`g-<time>-<seq>-<8>`), for {@link shortValueLength}. */
+const LONGEST_GENERATION = `g-${'z'.repeat(9)}-${'z'.repeat(6)}-${'z'.repeat(8)}`;
+
+/**
+ * Issue #4604 S13 (§1.10 決め 3): how long the short value of a draft holding `text` is (no tag, "unknown",
+ * the #4503 mark kept) — a full store refusing values longer than this takes the short value and the
+ * draft's text alone, and refuses the value with a tag (a tag is longer than a generation).
+ */
+export function shortValueLength(text: string, sendMark: { text: string; target: string } | null = null): number {
+  return JSON.stringify({ v: 1, text, tags: [], unknown: LONGEST_GENERATION, sendMark }).length;
+}
+
+/** Issue #4604 S13: a draft's one value, as the lib writes it. */
+export function draftValue(value: { text?: string; tags?: readonly RetargetTag[]; unknown?: string | null; sendMark?: { text: string; target: string } | null }): string {
+  return JSON.stringify({ v: 1, text: value.text ?? '', tags: value.tags ?? [], unknown: value.unknown ?? null, sendMark: value.sendMark ?? null });
+}
+
+/** Issue #4604 S13: what the store holds for a draft, read by the lib's public read (its text, marks, #4503 mark). */
+export function storedDraft(draftKey: string) {
+  return readDraft(draftKey);
+}
+
+/**
+ * Issue #4604 S13: whether a draft's value carries a mark (a tag or "unknown") — a fault that refuses these
+ * is the shape of before's "`:retarget` setItem throws" (the text alone still goes in).
+ */
+export function carriesMark(value: string): boolean {
+  try {
+    const parsed = JSON.parse(value) as { tags?: unknown[]; unknown?: unknown };
+    return (Array.isArray(parsed.tags) && parsed.tags.length > 0) || (parsed.unknown !== null && parsed.unknown !== undefined);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Issue #4604 S13: what the store holds for a draft, past every fault (the real `getItem`): its one value,
+ * or — while none is stored — its keys of before, read the same way the lib's read does.
+ */
+export function rawDraft(draftKey: string): { text: string; marks: ReturnType<typeof readDraft>['marks'] } {
+  const raw = rawStore();
+  return readDraft(draftKey, { storage: { getItem: raw.get, setItem: raw.set, removeItem: raw.remove } });
+}
 
 export interface StoreFaults {
   /** Replace the rules (none: the store works). */
@@ -56,6 +108,7 @@ export function installStoreFaults(rules: StoreFaultRule[] = []): StoreFaults {
       if (rule.method !== method) continue;
       if (rule.key && !rule.key(key)) continue;
       if (rule.overBytes !== undefined && (value ?? '').length <= rule.overBytes) continue;
+      if (rule.value !== undefined && !rule.value(value ?? '')) continue;
       const n = (seen.get(rule) ?? 0) + 1;
       seen.set(rule, n);
       const when = rule.when ?? 'always';
@@ -124,9 +177,20 @@ export function otherTabWrites(key: string, value: string | null): void {
   window.dispatchEvent(new StorageEvent('storage', { key, oldValue, newValue: value, storageArea: window.localStorage }));
 }
 
-/** Another tab let the tags of `draftKey` go (it sent that draft). */
+/** Another tab let the tags of `draftKey` go (it sent that draft — S13: its value goes with the text). */
 export function otherTabReleases(draftKey: string): void {
-  otherTabWrites(getRetargetTagKey(draftKey), null);
+  otherTabWrites(getDraftValueKey(draftKey), null);
+}
+
+/**
+ * Issue #4604 S13: another tab writes the draft `draftKey`'s one value (null removes it) — the store
+ * alone, and this document hears its `StorageEvent`.
+ */
+export function otherTabWritesDraft(
+  draftKey: string,
+  value: { text?: string; tags?: readonly RetargetTag[]; unknown?: string | null; sendMark?: { text: string; target: string } | null } | null,
+): void {
+  otherTabWrites(getDraftValueKey(draftKey), value === null ? null : draftValue(value));
 }
 
 /** The model's failures of the store, for the road's pure tests (T-f · T-g). */
@@ -135,10 +199,26 @@ export type ModelFail = 'none' | 'rThrow' | 'wAll' | 'wShort' | 'wBody' | 'rmThr
 /** The longest `:retarget` value `wShort` still takes: the short "unknown" (no tags) fits, a tag does not. */
 export const SHORT_VALUE_LIMIT = 60;
 
+const VALUE_SUFFIX = ':value';
+const RETARGET_SUFFIX = ':retarget';
+
+/** The draft key of a `<K>:value` or `<K>:retarget` key (null: neither). */
+function draftOfKey(key: string): { draft: string; value: boolean } | null {
+  if (key.endsWith(VALUE_SUFFIX)) return { draft: key.slice(0, -VALUE_SUFFIX.length), value: true };
+  if (key.endsWith(RETARGET_SUFFIX)) return { draft: key.slice(0, -RETARGET_SUFFIX.length), value: false };
+  return null;
+}
+
 /**
  * An in-memory store with the model's failures: `rThrow` — reading `:retarget` throws; `wAll` —
  * every write throws; `wShort` — a `:retarget` value longer than {@link SHORT_VALUE_LIMIT} and every
  * text write throw; `wBody` — text writes throw; `rmThrow` — every remove throws.
+ *
+ * Issue #4604 S13: the road reads and writes a draft's one value (`<K>:value`). This store keeps the marks
+ * of a value with no text and no #4503 mark under `<K>:retarget` in the shape of before (a list, or
+ * `{"unknown":…,"tags":[…]}`), and shows them to the road as `<K>:value` — so a test seeds and reads
+ * `:retarget` as it did, and the failures above judge the marks by the shape of before. A value with a
+ * text (or a #4503 mark) is kept as it is under `<K>:value` (a text write: `wShort`・`wBody` refuse it).
  */
 export class MemoryRetargetStorage {
   readonly data = new Map<string, string>();
@@ -149,29 +229,96 @@ export class MemoryRetargetStorage {
   onRetargetWrite: ((key: string, value: string | null) => void) | null = null;
 
   getItem(key: string): string | null {
-    if (this.fail === 'rThrow' && isRetargetKey(key)) throw new Error('getItem');
+    const of = draftOfKey(key);
+    // `rThrow`: the marks cannot be read. A value with no text of its own is shown as one the road cannot
+    // read as a value (junk — the road's table reads it as it reads a throw), so the road still knows there
+    // is no text (it writes the marks as "unknown", as it did over a `:retarget` that threw).
+    if (this.fail === 'rThrow' && of !== null && of.value && !this.data.has(key)) return '{"rThrow"';
+    if (this.fail === 'rThrow' && of !== null) throw new Error('getItem');
+    if (of !== null && of.value) {
+      const stored = this.data.get(key);
+      if (stored !== undefined) return stored;
+      const marks = this.data.get(of.draft + RETARGET_SUFFIX);
+      return marks === undefined ? null : MemoryRetargetStorage.asValue(marks);
+    }
+    if (of !== null && this.data.has(of.draft + VALUE_SUFFIX)) return null;
     return this.data.get(key) ?? null;
   }
 
   setItem(key: string, value: string): void {
-    const retarget = isRetargetKey(key);
-    const refuse =
-      this.fail === 'wAll' ||
-      (this.fail === 'wShort' && (!retarget || value.length > SHORT_VALUE_LIMIT)) ||
-      (this.fail === 'wBody' && !retarget);
-    if (retarget) this.attempts.push({ key, value, ok: !refuse });
-    if (refuse) throw new Error('setItem');
+    const of = draftOfKey(key);
+    if (of !== null && of.value) {
+      const marks = MemoryRetargetStorage.asMarks(value);
+      if (marks !== undefined) {
+        this.writeMarks(of.draft, marks, () => this.data.delete(key));
+        return;
+      }
+      // A value with a text: a text write.
+      if (this.fail === 'wAll' || this.fail === 'wShort' || this.fail === 'wBody') throw new Error('setItem');
+      this.data.set(key, value);
+      this.data.delete(of.draft + RETARGET_SUFFIX);
+      return;
+    }
+    if (of !== null) {
+      this.writeMarks(of.draft, value, () => undefined);
+      return;
+    }
+    if (this.fail === 'wAll' || this.fail === 'wShort' || this.fail === 'wBody') throw new Error('setItem');
     this.data.set(key, value);
-    if (retarget) this.onRetargetWrite?.(key, value);
   }
 
   removeItem(key: string): void {
-    const retarget = isRetargetKey(key);
-    const refuse = this.fail === 'rmThrow' || this.fail === 'wAll';
-    if (retarget) this.attempts.push({ key, value: null, ok: !refuse });
-    if (refuse) throw new Error('removeItem');
+    const of = draftOfKey(key);
+    if (of !== null && !of.value && this.data.has(of.draft + VALUE_SUFFIX)) {
+      // The road's migration lets the key of before go once the value is in: nothing of it is here.
+      if (this.fail === 'rmThrow' || this.fail === 'wAll') throw new Error('removeItem');
+      return;
+    }
+    if (of !== null) {
+      this.writeMarks(of.draft, null, () => this.data.delete(of.draft + VALUE_SUFFIX));
+      return;
+    }
+    if (this.fail === 'rmThrow' || this.fail === 'wAll') throw new Error('removeItem');
     this.data.delete(key);
-    if (retarget) this.onRetargetWrite?.(key, null);
+  }
+
+  /** The marks of `draft` written in the shape of before (null: removed). */
+  private writeMarks(draft: string, marks: string | null, also: () => void): void {
+    const tagKey = draft + RETARGET_SUFFIX;
+    const refuse =
+      marks === null
+        ? this.fail === 'rmThrow' || this.fail === 'wAll'
+        : this.fail === 'wAll' || (this.fail === 'wShort' && marks.length > SHORT_VALUE_LIMIT);
+    this.attempts.push({ key: tagKey, value: marks, ok: !refuse });
+    if (refuse) throw new Error(marks === null ? 'removeItem' : 'setItem');
+    if (marks === null) this.data.delete(tagKey);
+    else this.data.set(tagKey, marks);
+    also();
+    this.onRetargetWrite?.(tagKey, marks);
+  }
+
+  /** The marks of before shown as a value with no text (junk stays junk). */
+  private static asValue(marks: string): string {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(marks);
+    } catch {
+      return marks;
+    }
+    if (Array.isArray(parsed)) return JSON.stringify({ v: 1, text: '', tags: parsed, unknown: null, sendMark: null });
+    if (typeof parsed === 'object' && parsed !== null) {
+      const { unknown, tags } = parsed as { unknown?: unknown; tags?: unknown };
+      if (typeof unknown === 'string' && Array.isArray(tags)) return JSON.stringify({ v: 1, text: '', tags, unknown, sendMark: null });
+    }
+    return marks;
+  }
+
+  /** A value with no text and no #4503 mark as the marks of before (null: no marks; undefined: it has a text). */
+  private static asMarks(value: string): string | null | undefined {
+    const parsed = JSON.parse(value) as { text: string; tags: unknown[]; unknown: string | null; sendMark: unknown };
+    if (parsed.text !== '' || parsed.sendMark !== null) return undefined;
+    if (parsed.unknown !== null) return JSON.stringify({ unknown: parsed.unknown, tags: parsed.tags });
+    return parsed.tags.length > 0 ? JSON.stringify(parsed.tags) : null;
   }
 }
 

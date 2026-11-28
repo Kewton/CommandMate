@@ -26,7 +26,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, screen, waitFor, act, cleanup } from '@testing-library/react';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import { mockCommandGroups, getTextarea, typeMessage, pressEnter } from '@tests/helpers/message-input-test-utils';
-import { getInstanceDraftKey, getRetargetTagKey, getSplitDraftKey } from '@/lib/drafts/message-draft';
+import { getDraftValueKey, getInstanceDraftKey, getRetargetTagKey, getSplitDraftKey, readRetargetTags, writeRetarget } from '@/lib/drafts/message-draft';
+import { draftValue, releasePageMarks } from '@tests/helpers/draft-store-fault-4604';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 vi.mock('next-intl', async () => {
@@ -130,6 +131,8 @@ afterEach(() => {
 
 describe.each(SHAPES)('[#4607] $name', ({ props, key }) => {
   const tagKey = getRetargetTagKey(key);
+  // Issue #4604 S13: the draft's one value (its text and its marks).
+  const valueKey = getDraftValueKey(key);
 
   function renderComposer() {
     return render(
@@ -138,10 +141,11 @@ describe.each(SHAPES)('[#4607] $name', ({ props, key }) => {
   }
 
   /** `getItem` of this draft's tag key alone throws; every other key reads as usual. */
+  // Issue #4604 S13: the tags are in the draft's one value — its key is the one that throws.
   function throwOnTagKey() {
     const real = Storage.prototype.getItem;
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, k: string) {
-      if (k === tagKey) throw new DOMException('denied', 'SecurityError');
+      if (k === valueKey) throw new DOMException('denied', 'SecurityError');
       return real.call(this, k);
     });
   }
@@ -193,7 +197,8 @@ describe.each(SHAPES)('[#4607] $name', ({ props, key }) => {
       await settle();
       expectSentToCurrent(sendMessageMock.mock.calls[0]);
       expect(sendMessageMock).toHaveBeenCalledTimes(1);
-      expect(JSON.parse(window.localStorage.getItem(tagKey) ?? '[]')).toEqual([tagOf('other-tab-1', ORIGINAL)]);
+      // Issue #4604 S13: read from the draft's one value.
+      expect(readRetargetTags(key)).toEqual([tagOf('other-tab-1', ORIGINAL)]);
     });
   });
 
@@ -288,15 +293,15 @@ describe.each(SHAPES)('[#4607] $name', ({ props, key }) => {
   });
   describe('r2 the one-send yes is never left for a later send', () => {
     const OTHER: Target = { id: 'codex-3', tool: 'codex' };
-    const sendUnknownKey = `${key}:send-unknown`;
     const previewKey = `${WT}\u0000${CURRENT.id}`;
 
     /** `getItem` of any draft's tag key throws while `state.unreadable`; every other key as usual. */
+    // Issue #4604 S13: the tags are in a draft's one value — its key is the one that throws.
     function switchableTagStore() {
       const state = { unreadable: true };
       const real = Storage.prototype.getItem;
       vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, k: string) {
-        if (state.unreadable && k.endsWith(':retarget')) throw new DOMException('denied', 'SecurityError');
+        if (state.unreadable && k.endsWith(':value')) throw new DOMException('denied', 'SecurityError');
         return real.call(this, k);
       });
       return state;
@@ -317,14 +322,18 @@ describe.each(SHAPES)('[#4607] $name', ({ props, key }) => {
     }
 
     it('A: a yes held by #4503 before the POST is not spent on another text — Enter POSTs nothing and asks', async () => {
-      switchableTagStore();
+      // Issue #4604 S13: the #4503 mark is in the draft's one value with its tags, so a value that cannot be
+      // read hides it too — the tags not known here are this page's mark (nothing could be stored), and
+      // the value stays readable for the #4503 mark.
+      const throwing = { getItem: () => null, setItem: () => { throw new Error('full'); }, removeItem: () => { throw new Error('full'); } };
+      writeRetarget(key, { kind: 'add', tags: [tagOf('t-page', ORIGINAL)] }, { storage: throwing });
       renderComposer();
       typeMessage(TEXT);
       await settle();
       pressEnter();
       await screen.findByTestId('message-input-retarget-confirm');
       // Meanwhile another composer of the same draft marked the same text's send as unknown here.
-      window.localStorage.setItem(sendUnknownKey, JSON.stringify({ text: TEXT, target: previewKey }));
+      window.localStorage.setItem(valueKey, draftValue({ text: TEXT, sendMark: { text: TEXT, target: previewKey } }));
       fireEvent.click(screen.getByTestId('message-input-retarget-confirm-yes'));
       await settle();
       expect(sendMessageMock).not.toHaveBeenCalled();
@@ -333,6 +342,7 @@ describe.each(SHAPES)('[#4607] $name', ({ props, key }) => {
       await settle();
       pressEnter();
       await expectAsksWithoutPost();
+      releasePageMarks([key]);
     });
 
     it('B: a yes carried to the brief, held at its choice by a new tag, is not spent later — Enter POSTs nothing and asks', async () => {
@@ -341,16 +351,16 @@ describe.each(SHAPES)('[#4607] $name', ({ props, key }) => {
       renderComposer();
       await askedThenYes();
       await screen.findByTestId('session-start-brief-decline');
-      // The store reads again, with a tag whose original target is not this To.
+      // The store reads again, with a tag whose original target is not this To (S13: in the draft's value).
       store.unreadable = false;
-      window.localStorage.setItem(tagKey, JSON.stringify([tagOf('t-b', ORIGINAL)]));
+      window.localStorage.setItem(valueKey, draftValue({ text: TEXT, tags: [tagOf('t-b', ORIGINAL)] }));
       fireEvent.click(screen.getByTestId('session-start-brief-decline'));
       await expectAsksWithoutPost();
       expect(screen.queryByTestId('session-start-brief-dialog')).toBeNull();
       fireEvent.click(screen.getByTestId('message-input-retarget-confirm-no'));
       // The store cannot be read again (the tag gone with it).
       store.unreadable = true;
-      window.localStorage.removeItem(tagKey);
+      window.localStorage.removeItem(valueKey);
       fetchStartPreviewMock.mockResolvedValue(NOT_SHOWN);
       await settle();
 
@@ -383,7 +393,8 @@ describe.each(SHAPES)('[#4607] $name', ({ props, key }) => {
       await settle();
       pressEnter();
       await screen.findByTestId('session-start-brief-decline');
-      window.localStorage.setItem(tagKey, JSON.stringify([tagOf('other-tab-1', ORIGINAL)]));
+      // Issue #4604 S13: another tab writes the draft's one value.
+      window.localStorage.setItem(valueKey, draftValue({ text: TEXT, tags: [tagOf('other-tab-1', ORIGINAL)] }));
       fireEvent.click(screen.getByTestId('session-start-brief-decline'));
       await expectAsksWithoutPost();
       expect(screen.getByTestId('message-input-retarget-confirm').textContent).toContain(ORIGINAL.id);
@@ -396,7 +407,8 @@ describe.each(SHAPES)('[#4607] $name', ({ props, key }) => {
       await settle();
       pressEnter();
       await screen.findByTestId('message-input-retarget-confirm');
-      window.localStorage.setItem(tagKey, JSON.stringify([tagOf('t-a', ORIGINAL), tagOf('t-b', OTHER)]));
+      // Issue #4604 S13: another tab writes the draft's one value.
+      window.localStorage.setItem(valueKey, draftValue({ text: TEXT, tags: [tagOf('t-a', ORIGINAL), tagOf('t-b', OTHER)] }));
       fireEvent.click(screen.getByTestId('message-input-retarget-confirm-yes'));
       await expectAsksWithoutPost();
 
@@ -411,7 +423,8 @@ describe.each(SHAPES)('[#4607] $name', ({ props, key }) => {
       await askedThenYes();
       await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
       await waitFor(() => expect(getTextarea().value).toBe(''));
-      window.localStorage.setItem(tagKey, JSON.stringify([tagOf('t-a', ORIGINAL), tagOf('t-b', OTHER)]));
+      // Issue #4604 S13: another tab writes the draft's one value.
+      window.localStorage.setItem(valueKey, draftValue({ tags: [tagOf('t-a', ORIGINAL), tagOf('t-b', OTHER)] }));
 
       typeMessage(TEXT);
       await settle();
@@ -526,9 +539,10 @@ describe('[#4607 r3] a yes holds only for the To it answered', () => {
     if (store === 'readable') {
       window.localStorage.setItem(tagKey, JSON.stringify([tagOf('t-r3', ORIGINAL)]));
     } else {
+      // Issue #4604 S13: the tags are in the draft's one value — its key is the one that throws.
       const real = Storage.prototype.getItem;
       vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, k: string) {
-        if (k === tagKey) throw new DOMException('denied', 'SecurityError');
+        if (k === getDraftValueKey(shape.key)) throw new DOMException('denied', 'SecurityError');
         return real.call(this, k);
       });
     }
@@ -630,14 +644,15 @@ describe('[#4607 r3] a yes holds only for the To it answered', () => {
       typeMessage(TEXT);
       await settle();
       // Stored after the draft was read: in the store only (this composer's send does not let it go).
-      window.localStorage.setItem(getRetargetTagKey(shape.key), JSON.stringify([tagOf('t-kept', ORIGINAL)]));
+      // Issue #4604 S13: another tab writes the draft's one value.
+      window.localStorage.setItem(getDraftValueKey(shape.key), draftValue({ tags: [tagOf('t-kept', ORIGINAL)] }));
       pressEnter();
       await settle();
       expect(band()?.textContent).toContain(describe_(FROM));
       fireEvent.click(screen.getByTestId('message-input-retarget-confirm-yes'));
       await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
       await waitFor(() => expect(getTextarea().value).toBe(''));
-      expect(JSON.parse(window.localStorage.getItem(getRetargetTagKey(shape.key)) ?? '[]')).toEqual([tagOf('t-kept', ORIGINAL)]);
+      expect(readRetargetTags(shape.key)).toEqual([tagOf('t-kept', ORIGINAL)]);
 
       typeMessage(TEXT);
       await settle();
