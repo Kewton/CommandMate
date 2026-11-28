@@ -17,6 +17,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
+import { storedDraft } from '@tests/helpers/draft-store-fault-4604';
 
 beforeAll(() => installRadixJsdomPolyfills());
 
@@ -151,9 +152,10 @@ describe('[#4419] a /sessions tile keeps one draft per instance', () => {
   it('two tiles of the same worktree side by side: a draft typed on one never shows on the other', async () => {
     const agyTile = renderTile();
     agyTile.type(AGY_DRAFT);
-    // Saved (debounced) before the second tile mounts and reads the storage.
+    // Saved (debounced) before the second tile mounts and reads the storage (Issue #4604 S13: the text of
+    // a draft's one value).
     await waitFor(
-      () => expect(Object.values({ ...window.localStorage })).toContain(AGY_DRAFT),
+      () => expect(Object.keys({ ...window.localStorage }).map((key) => storedDraft(key.replace(/:value$/, '')).text)).toContain(AGY_DRAFT),
       { timeout: 2000 },
     );
     const claudeTile = renderTile();
@@ -239,7 +241,7 @@ describe('[#4419] a /sessions tile keeps one draft per instance', () => {
     watcher.type(`watching\n\n${AGY_DRAFT} more`);
     await waitFor(
       () =>
-        expect(window.localStorage.getItem('commandmate:draft-message:wt-1:instance:antigravity')).toBe(
+        expect(storedDraft('commandmate:draft-message:wt-1:instance:antigravity').text).toBe(
           `watching\n\n${AGY_DRAFT} more`,
         ),
       { timeout: 2000 },
@@ -252,7 +254,7 @@ describe('[#4419] a /sessions tile keeps one draft per instance', () => {
     expect(first.textarea().value).toBe('');
     first.type(AGY_DRAFT);
     await waitFor(
-      () => expect(window.localStorage.getItem('commandmate:draft-message:wt-1:instance:antigravity')).toBe(AGY_DRAFT),
+      () => expect(storedDraft('commandmate:draft-message:wt-1:instance:antigravity').text).toBe(AGY_DRAFT),
       { timeout: 2000 },
     );
     const second = renderTile();
@@ -267,7 +269,7 @@ describe('[#4419] a /sessions tile keeps one draft per instance', () => {
     render(<MessageInput worktreeId="wt-1" cliToolId="antigravity" instanceId="antigravity" splitIndex={1} />);
     fireEvent.change(document.querySelector('[data-testid="message-input-textarea"]')!, { target: { value: AGY_DRAFT } });
     await waitFor(
-      () => expect(window.localStorage.getItem('commandmate:draft-message:wt-1:1')).toBe(AGY_DRAFT),
+      () => expect(storedDraft('commandmate:draft-message:wt-1:1').text).toBe(AGY_DRAFT),
       { timeout: 2000 },
     );
   });

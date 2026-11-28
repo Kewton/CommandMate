@@ -14,9 +14,11 @@
  */
 import { describe, it, expect, vi, afterEach, beforeEach, expectTypeOf } from 'vitest';
 import {
+  getDraftValueKey,
   getRetargetTagKey,
   getSplitDraftKey,
   newRetargetTag,
+  readDraft,
   readRetargetTags,
   returnRetargetedText,
   subscribeRetargetedText,
@@ -63,8 +65,9 @@ describe('[#4535 r7 INV-V2a] returnRetargetedText: the text and its tag go toget
     expect(returnRetargetedText(KEY, { text: 'please look', tag })).toBe(true);
     off();
     expect(readRetargetTags(KEY)).toEqual([tag]);
-    expect(window.localStorage.getItem(getRetargetTagKey(KEY))).not.toBeNull();
-    expect(window.localStorage.getItem(KEY)).toBe('already typed\n\nplease look');
+    // Issue #4604 S13: the tag and the text are in the draft's one value, next to nothing else.
+    expect(window.localStorage.getItem(getDraftValueKey(KEY))).not.toBeNull();
+    expect(readDraft(KEY).text).toBe('already typed\n\nplease look');
     expect(heard).toEqual([{ text: 'please look', tag }]);
     // Nothing is written for the worktree as a whole.
     expect(window.localStorage.getItem(`commandmate:draft-message:${WT}:retarget-hold`)).toBeNull();

@@ -9,6 +9,7 @@ import {
   appendToStoredDraft,
   getInstanceDraftKey,
   getSplitDraftKey,
+  readDraft,
 } from '@/lib/drafts/message-draft';
 
 beforeEach(() => window.localStorage.clear());
@@ -30,11 +31,12 @@ describe('[#4419] message draft keys', () => {
 
   it('appends after a blank line, or fills an empty draft', () => {
     const key = getInstanceDraftKey('wt-1', 'antigravity');
+    // Issue #4604 S13: the text is read from the draft's one value.
     appendToStoredDraft(key, 'first');
-    expect(window.localStorage.getItem(key)).toBe('first');
+    expect(readDraft(key).text).toBe('first');
     appendToStoredDraft(key, 'second');
-    expect(window.localStorage.getItem(key)).toBe('first\n\nsecond');
+    expect(readDraft(key).text).toBe('first\n\nsecond');
     appendToStoredDraft(key, '');
-    expect(window.localStorage.getItem(key)).toBe('first\n\nsecond');
+    expect(readDraft(key).text).toBe('first\n\nsecond');
   });
 });

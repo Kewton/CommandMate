@@ -11,6 +11,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MessageInput } from '@/components/worktree/MessageInput';
+import { storedDraft } from '@tests/helpers/draft-store-fault-4604';
 import { useSlashCommands } from '@/hooks/useSlashCommands';
 import {
   mockCommandGroups,
@@ -751,26 +752,27 @@ describe('MessageInput', () => {
       const { rerender } = render(
         <MessageInput {...defaultProps} splitIndex={0} />
       );
+      // Issue #4604 S13: each split's draft is its one value (read with the lib's public read).
       typeMessage('first split text');
       await waitFor(() => {
         expect(
-          window.localStorage.getItem('commandmate:draft-message:test-worktree:0'),
+          storedDraft('commandmate:draft-message:test-worktree:0').text,
         ).toBe('first split text');
       });
 
       rerender(<MessageInput {...defaultProps} splitIndex={1} />);
       // After rerender with splitIndex=1, draft for index 0 should still be there.
       expect(
-        window.localStorage.getItem('commandmate:draft-message:test-worktree:0'),
+        storedDraft('commandmate:draft-message:test-worktree:0').text,
       ).toBe('first split text');
       typeMessage('second split text');
       await waitFor(() => {
         expect(
-          window.localStorage.getItem('commandmate:draft-message:test-worktree:1'),
+          storedDraft('commandmate:draft-message:test-worktree:1').text,
         ).toBe('second split text');
       });
       expect(
-        window.localStorage.getItem('commandmate:draft-message:test-worktree:0'),
+        storedDraft('commandmate:draft-message:test-worktree:0').text,
       ).toBe('first split text');
     });
 
@@ -783,8 +785,9 @@ describe('MessageInput', () => {
       expect(
         window.localStorage.getItem('commandmate:draft-message:test-worktree'),
       ).toBeNull();
+      // Issue #4604 S13: the split-0 draft is its one value.
       expect(
-        window.localStorage.getItem('commandmate:draft-message:test-worktree:0'),
+        storedDraft('commandmate:draft-message:test-worktree:0').text,
       ).toBe('legacy-draft');
       const textarea = getTextarea();
       expect(textarea.value).toBe('legacy-draft');
@@ -804,9 +807,9 @@ describe('MessageInput', () => {
       expect(
         window.localStorage.getItem('commandmate:draft-message:test-worktree'),
       ).toBeNull();
-      // But the existing new-format draft is preserved.
+      // But the existing new-format draft is preserved (Issue #4604 S13: read from its one value).
       expect(
-        window.localStorage.getItem('commandmate:draft-message:test-worktree:0'),
+        storedDraft('commandmate:draft-message:test-worktree:0').text,
       ).toBe('newer-draft');
     });
 

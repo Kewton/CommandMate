@@ -59,7 +59,7 @@ import { SessionTile } from '@/components/sessions/SessionTile';
 import { ToastProvider } from '@/components/common/Toast';
 import { resetRevealedStartingTerminals } from '@/hooks/useSessionStartingGate';
 import { getInstanceDraftKey } from '@/lib/drafts/message-draft';
-import { installStoreFaults, isRetargetKey, releasePageMarks, type StoreFaultRule } from '@tests/helpers/draft-store-fault-4604';
+import { installStoreFaults, isDraftValueKey, releasePageMarks, shortValueLength, storedDraft, type StoreFaultRule } from '@tests/helpers/draft-store-fault-4604';
 import type { Worktree } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
@@ -180,7 +180,8 @@ async function arrange(refusal: string | null, after: Roster, rules: StoreFaultR
   await waitFor(() => expect(ta('A')).toBeInTheDocument());
   fireEvent.change(ta('A'), { target: { value: TEXT } });
   await flush(600);
-  expect(window.localStorage.getItem(getInstanceDraftKey(WT, I1.id))).toBe(TEXT);
+  // Issue #4604 S13: the draft is its one value (read with the lib's public read).
+  expect(storedDraft(getInstanceDraftKey(WT, I1.id)).text).toBe(TEXT);
   shown = { ...shown, B: 'codex-2' };
   view.rerender(tree());
   await flush(30);
@@ -210,8 +211,10 @@ async function arrange(refusal: string | null, after: Roster, rules: StoreFaultR
 const AFTER: Roster = { 'codex-2': 'claude', claude: 'claude' };
 
 describe.each<[string, StoreFaultRule[]]>([
-  ['a full store (a long :retarget value throws)', [{ method: 'setItem', key: isRetargetKey, overBytes: 60 }]],
-  ['every :retarget setItem throws', [{ method: 'setItem', key: isRetargetKey }]],
+  // Issue #4604 S13: the tag goes into the draft's one value — the rules pick its key (the names are the
+  // cases of before: a value with the tag does not fit, no value goes in).
+  ['a full store (a long :retarget value throws)', [{ method: 'setItem', key: isDraftValueKey, overBytes: shortValueLength(TEXT) }]],
+  ['every :retarget setItem throws', [{ method: 'setItem', key: isDraftValueKey }]],
 ])('[#4604 a P2-2] two tiles, one draft key, the tag cannot be stored: %s', (_name, rules) => {
   it('tile 2: Enter once POSTs nothing and asks; yes POSTs once to this To', async () => {
     await arrange('tool-changed', AFTER, rules);

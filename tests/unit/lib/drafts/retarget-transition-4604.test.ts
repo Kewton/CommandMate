@@ -82,7 +82,12 @@ function expected(prev: RetargetStoreRead, op: RetargetOp, m: string | null, gen
     }
     if (prev.kind === 'unknown') {
       const tags = union(prev.tags, op.tags);
-      if (m !== null && m !== prev.generation) return { next: { kind: 'unknown', generation: gen(), tags }, clear: false };
+      if (m !== null && m !== prev.generation) {
+        // #4616 (S13 t6b, review r2 P2-1): a write-back keeps the store's generation and the page's mark goes
+        // into it; a tag that comes in (`add`) takes a new generation.
+        if (op.kind === 'writeBack') return { next: { kind: 'unknown', generation: prev.generation, tags }, clear: true };
+        return { next: { kind: 'unknown', generation: gen(), tags }, clear: false };
+      }
       return { next: { kind: 'unknown', generation: prev.generation, tags }, clear: m === prev.generation };
     }
     return { next: { kind: 'unknown', generation: gen(), tags: [...op.tags] }, clear: false };

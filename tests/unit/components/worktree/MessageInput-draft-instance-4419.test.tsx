@@ -20,7 +20,8 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, screen, waitFor, act } from '@testing-library/react';
 import { MessageInput } from '@/components/worktree/MessageInput';
-import { appendToStoredDraft } from '@/lib/drafts/message-draft';
+import { appendToStoredDraft, getDraftValueKey } from '@/lib/drafts/message-draft';
+import { draftValue, storedDraft } from '@tests/helpers/draft-store-fault-4604';
 import { mockCommandGroups, getTextarea, typeMessage } from '@tests/helpers/message-input-test-utils';
 
 vi.mock('next-intl', async () => {
@@ -144,7 +145,8 @@ describe('[#4419 再指示 1] a G-3 send and an instance switch', () => {
     fireEvent.click(screen.getByTestId('session-start-brief-full'));
     await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
     expect(sendMessageMock.mock.calls[0][1]).toBe(AGY_DRAFT);
-    window.localStorage.setItem(AGY_KEY, AGY_DRAFT);
+    // Issue #4604 S13: the sent draft is stored as its one value.
+    window.localStorage.setItem(getDraftValueKey(AGY_KEY), draftValue({ text: AGY_DRAFT }));
 
     view.rerender(tileComposer('claude'));
     await waitFor(() => expect(getTextarea().value).toBe(CLAUDE_DRAFT));
@@ -154,7 +156,7 @@ describe('[#4419 再指示 1] a G-3 send and an instance switch', () => {
     });
 
     expect(getTextarea().value).toBe(CLAUDE_DRAFT);
-    expect(window.localStorage.getItem(AGY_KEY)).toBeNull();
+    expect(storedDraft(AGY_KEY).text).toBe('');
     // 再指示 2 (P3-1): the image that went with the antigravity send is off the composer, so the
     // next Send cannot take it to claude.
     expect(sendMessageMock.mock.calls[0][2]).toMatchObject({ imagePath: '.commandmate/attachments/shot.png' });
@@ -164,7 +166,7 @@ describe('[#4419 再指示 1] a G-3 send and an instance switch', () => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 650));
     });
-    expect(window.localStorage.getItem(CLAUDE_KEY)).toBe(CLAUDE_DRAFT);
+    expect(storedDraft(CLAUDE_KEY).text).toBe(CLAUDE_DRAFT);
   });
 
   it('a question open when the composer switches instance closes, and nothing is sent with its boundary', async () => {
@@ -198,7 +200,7 @@ describe('[#4419 再指示 2] text appended to the shown draft and a switch in t
       appendToStoredDraft(AGY_KEY, AGY_DRAFT);
       view.rerender(tileComposer('claude'));
     });
-    expect(window.localStorage.getItem(AGY_KEY)).toBe(`typing\n\n${AGY_DRAFT}`);
+    expect(storedDraft(AGY_KEY).text).toBe(`typing\n\n${AGY_DRAFT}`);
     await waitFor(() => expect(getTextarea().value).toBe(''));
     view.rerender(tileComposer('antigravity'));
     await waitFor(() => expect(getTextarea().value).toBe(`typing\n\n${AGY_DRAFT}`));
@@ -211,7 +213,7 @@ describe('[#4419 再指示 2] text appended to the shown draft and a switch in t
       appendToStoredDraft(AGY_KEY, AGY_DRAFT);
     });
     expect(getTextarea().value).toBe(`typing\n\n${AGY_DRAFT}`);
-    await waitFor(() => expect(window.localStorage.getItem(AGY_KEY)).toBe(`typing\n\n${AGY_DRAFT}`), { timeout: 2000 });
+    await waitFor(() => expect(storedDraft(AGY_KEY).text).toBe(`typing\n\n${AGY_DRAFT}`), { timeout: 2000 });
   });
 });
 
@@ -220,7 +222,8 @@ describe('[#4419 再指示 1] the legacy draft keys', () => {
     window.localStorage.setItem(`commandmate:draft-message:${WT}`, 'legacy draft');
     render(<MessageInput worktreeId={WT} cliToolId="claude" splitIndex={0} />);
     await waitFor(() => expect(getTextarea().value).toBe('legacy draft'));
-    expect(window.localStorage.getItem(`commandmate:draft-message:${WT}:0`)).toBe('legacy draft');
+    // Issue #4604 S13: the split-0 draft is its one value.
+    expect(storedDraft(`commandmate:draft-message:${WT}:0`).text).toBe('legacy draft');
     expect(window.localStorage.getItem(`commandmate:draft-message:${WT}`)).toBeNull();
   });
 

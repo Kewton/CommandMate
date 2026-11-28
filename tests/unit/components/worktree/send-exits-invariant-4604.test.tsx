@@ -39,6 +39,21 @@ import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
 
 beforeAll(() => installRadixJsdomPolyfills());
 
+/**
+ * Issue #4604 S13 t4b (the monitor's positive control): a mutation of the product made inside this test —
+ * while on, the send's check does not ask for the "unknown" the composer holds itself (it is dropped from
+ * `decideRetarget`), the way a product that forgot its memory would POST.
+ */
+const mutation = vi.hoisted(() => ({ ignoreHeldUnknown: false }));
+vi.mock('@/lib/drafts/message-draft', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/drafts/message-draft')>();
+  return {
+    ...actual,
+    decideRetarget: (...args: Parameters<typeof actual.decideRetarget>) =>
+      actual.decideRetarget(args[0], args[1], args[2], args[3], mutation.ignoreHeldUnknown ? null : (args[4] ?? null)),
+  };
+});
+
 vi.mock('next-intl', async () => {
   const { createRealIntlMock } = await import('@tests/helpers/real-intl');
   return createRealIntlMock('ja');
@@ -85,9 +100,11 @@ import { ToastProvider } from '@/components/common/Toast';
 import { resetRevealedStartingTerminals } from '@/hooks/useSessionStartingGate';
 import { applyWaitingEdge, useWorktreesCache } from '@/hooks/useWorktreesCache';
 import {
+  getDraftValueKey,
   getRetargetTagKey,
   getSplitDraftKey,
   newRetargetTag,
+  readRetargetStore,
   readRetargetUnstorable,
   returnRetargetedText,
 } from '@/lib/drafts/message-draft';
@@ -149,9 +166,11 @@ function checkPost(to: Target, content: string) {
     if (!content.includes(piece.text)) continue;
     if (piece.tagId === null && piece.generation === null) continue;
     if (piece.original !== null && sameTo(piece.original, to)) continue;
-    // The piece was shown by the question (its text on screen then), and its mark too: its id, or
-    // the "unknown" it is under (by the generation the question saw, or — a generation written back
-    // in its place — by the piece being on screen under an "unknown" the question saw).
+    // The piece was shown by the question (its text on screen then — `yes.texts`), and its mark too: its
+    // id, or the "unknown" it is under. S13 t4b: `noteQuestion` adds to `yes.seen` the generation of every
+    // piece under an "unknown" on screen when the monitor saw the question shown, so for such a piece the
+    // generation clause holds whenever `yes.texts` does — a yes covers what its question showed, text and To
+    // (review r2 P3-4: the clause names nothing more on its own).
     const covered = oracle.yeses.some(
       (yes) =>
         yes.key === oracle.key &&
@@ -166,22 +185,11 @@ function checkPost(to: Target, content: string) {
 
 /** What a question shown now shows: the ids and generations of the draft's marks (store and page mark). */
 function storeFacts(key: string): { ids: string[]; seen: string[] } {
-  const raw = window.localStorage.getItem(getRetargetTagKey(key));
-  const ids: string[] = [];
-  const seen: string[] = [];
-  if (raw !== null) {
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (Array.isArray(parsed)) ids.push(...parsed.map((t: { id: string }) => t.id));
-      else if (parsed && typeof parsed === 'object') {
-        const { unknown, tags } = parsed as { unknown?: string; tags?: Array<{ id: string }> };
-        if (typeof unknown === 'string') seen.push(unknown);
-        if (Array.isArray(tags)) ids.push(...tags.map((t) => t.id));
-      }
-    } catch {
-      /* junk: no ids, no generation — a yes to it covers nothing named */
-    }
-  }
+  // Issue #4604 S13: the marks are in the draft's one value (read with the lib's public read; junk: no
+  // ids, no generation — a yes to it covers nothing named).
+  const marks = readRetargetStore(key);
+  const ids: string[] = marks.kind === 'list' || marks.kind === 'unknown' ? marks.tags.map((t) => t.id) : [];
+  const seen: string[] = marks.kind === 'unknown' ? [marks.generation] : [];
   const mark = readRetargetUnstorable(key);
   if (mark !== null) seen.push(mark);
   return { ids, seen };
@@ -287,6 +295,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   window.localStorage.clear();
+  mutation.ignoreHeldUnknown = false;
 });
 
 // ---------------------------------------------------------------- the table
@@ -373,11 +382,20 @@ const pendingQuestions: Record<string, Yes | null> = {};
 function noteQuestion(name: string, to: Target) {
   expect(inComposer(name).getByTestId('message-input-retarget-confirm')).toBeInTheDocument();
   const onScreen = (inComposer(name).getByTestId('message-input-textarea') as HTMLTextAreaElement).value;
+  const facts = storeFacts(oracle.key);
+  const shown = oracle.pieces.filter((piece) => onScreen.includes(piece.text));
+  // Issue #4604 S13 t4b: what the monitor observed itself — this question was shown in `name` (its band is
+  // up: asserted above) while these pieces were on screen. A piece under an "unknown" was shown by it, its
+  // generation too (the composer may ask for the "unknown" it holds once the store no longer says it: the
+  // store's facts would not name it). Never the product's words.
+  for (const piece of shown) {
+    if (piece.generation !== null && !facts.seen.includes(piece.generation)) facts.seen.push(piece.generation);
+  }
   pendingQuestions[name] = {
     key: oracle.key,
     to,
-    ...storeFacts(oracle.key),
-    texts: oracle.pieces.filter((piece) => onScreen.includes(piece.text)).map((piece) => piece.text),
+    ...facts,
+    texts: shown.map((piece) => piece.text),
   };
 }
 function sayYes(name: string) {
@@ -477,7 +495,8 @@ describe('[#4604 T-P] composer exits × events (PC split pane)', () => {
       await flush(50);
       expect(oracle.posts).toHaveLength(1);
       await act(async () => {
-        window.dispatchEvent(new StorageEvent('storage', { key: getRetargetTagKey(KEY) }));
+        // Issue #4604 S13: the draft's one value is what another tab's write changes.
+        window.dispatchEvent(new StorageEvent('storage', { key: getDraftValueKey(KEY) }));
         window.dispatchEvent(new StorageEvent('storage', { key: KEY }));
       });
       await flush(30);
@@ -532,6 +551,62 @@ describe('[#4604 T-P] composer exits × events (PC split pane)', () => {
         await pressComposer('A', TO_A, exit);
       }
     }
+    expect(oracle.violations).toEqual([]);
+  });
+});
+
+describe('[#4604 S13 t4b] the monitor\'s positive control: a product that forgets the "unknown" its composer holds', () => {
+  it('(mutation) B holds the "unknown" its restore read; A says yes and sends; B\'s Enter does not ask but POSTs — the monitor names it', async () => {
+    oracle.key = KEY;
+    pendingQuestions.A = null;
+    pendingQuestions.B = null;
+    window.localStorage.setItem(KEY, 'hello');
+    window.localStorage.setItem(getRetargetTagKey(KEY), JSON.stringify({ unknown: 'g1', tags: [] }));
+    oracle.pieces.push({ text: 'hello', tagId: null, original: null, generation: 'g1' });
+    render(
+      <>
+        <Composer name="A" to={TO_A} blocked={false} />
+        <Composer name="B" to={TO_B} blocked={false} />
+      </>,
+    );
+    await flush(30);
+    fireEvent.keyDown(inComposer('A').getByTestId('message-input-textarea'), { key: 'Enter', code: 'Enter' });
+    await flush(30);
+    noteQuestion('A', TO_A);
+    sayYes('A');
+    await flush(50);
+    expect(oracle.posts).toHaveLength(1);
+    expect((inComposer('B').getByTestId('message-input-textarea') as HTMLTextAreaElement).value).toBe('hello');
+    mutation.ignoreHeldUnknown = true;
+    fireEvent.keyDown(inComposer('B').getByTestId('message-input-textarea'), { key: 'Enter', code: 'Enter' });
+    await flush(50);
+    expect(oracle.posts).toEqual([{ to: TO_A, content: 'hello' }, { to: TO_B, content: 'hello' }]);
+    expect(oracle.violations).toEqual([`POST to ${show(TO_B)} carries "hello" — no fact allows it`]);
+  });
+
+  it('(negative control, the same order unmutated) B\'s Enter asks: no POST to its To', async () => {
+    oracle.key = KEY;
+    pendingQuestions.A = null;
+    pendingQuestions.B = null;
+    window.localStorage.setItem(KEY, 'hello');
+    window.localStorage.setItem(getRetargetTagKey(KEY), JSON.stringify({ unknown: 'g1', tags: [] }));
+    oracle.pieces.push({ text: 'hello', tagId: null, original: null, generation: 'g1' });
+    render(
+      <>
+        <Composer name="A" to={TO_A} blocked={false} />
+        <Composer name="B" to={TO_B} blocked={false} />
+      </>,
+    );
+    await flush(30);
+    fireEvent.keyDown(inComposer('A').getByTestId('message-input-textarea'), { key: 'Enter', code: 'Enter' });
+    await flush(30);
+    noteQuestion('A', TO_A);
+    sayYes('A');
+    await flush(50);
+    fireEvent.keyDown(inComposer('B').getByTestId('message-input-textarea'), { key: 'Enter', code: 'Enter' });
+    await flush(50);
+    expect(oracle.posts).toEqual([{ to: TO_A, content: 'hello' }]);
+    expect(inComposer('B').getByTestId('message-input-retarget-confirm')).toBeInTheDocument();
     expect(oracle.violations).toEqual([]);
   });
 });

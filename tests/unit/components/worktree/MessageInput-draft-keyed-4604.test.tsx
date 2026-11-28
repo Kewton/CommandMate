@@ -23,8 +23,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, screen, act, cleanup } from '@testing-library/react';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import { mockCommandGroups, getTextarea, pressEnter } from '@tests/helpers/message-input-test-utils';
-import { getInstanceDraftKey } from '@/lib/drafts/message-draft';
-import { installStoreFaults, rawStore } from '@tests/helpers/draft-store-fault-4604';
+import { getDraftValueKey, getInstanceDraftKey } from '@/lib/drafts/message-draft';
+import { installStoreFaults, rawStore, storedDraft } from '@tests/helpers/draft-store-fault-4604';
 
 vi.mock('next-intl', async () => {
   const { createRealIntlMock } = await import('@tests/helpers/real-intl');
@@ -148,9 +148,9 @@ describe('[#4604 W-1] a press between the commit of the instance switch and the 
     await settle(50);
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(getTextarea().value).toBe('');
-    // The previous instance's draft stays its own.
-    expect(rawStore().get(KEY_A)).toBe(COMMAND);
-    expect(rawStore().get(KEY_B)).toBeNull();
+    // The previous instance's draft stays its own (Issue #4604 S13: each draft is its one value).
+    expect(storedDraft(KEY_A).text).toBe(COMMAND);
+    expect(rawStore().get(getDraftValueKey(KEY_B))).toBeNull();
   });
 
   it.each<Press>(['brief-short', 'brief-full', 'brief-decline'])('the brief up for the previous instance, %s: POST 0', async (kind) => {
@@ -165,7 +165,7 @@ describe('[#4604 W-1] a press between the commit of the instance switch and the 
     await settle(50);
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(screen.queryByTestId('session-start-brief-dialog')).toBeNull();
-    expect(rawStore().get(KEY_A)).toBe(PLAIN);
+    expect(storedDraft(KEY_A).text).toBe(PLAIN);
   });
 
   it('(positive control) after the restore, the new instance\'s own command sends as before', async () => {
@@ -189,7 +189,8 @@ describe('[#4604 4 回目・5 回目] a switch that cannot read the new draft', 
     window.localStorage.setItem(KEY_A, PLAIN);
     const view = render(<Harness instance={A} pressOnCommit={null} />);
     await settle();
-    installStoreFaults([{ method: 'getItem', key: (k) => k === KEY_B }]);
+    // Issue #4604 S13: the new draft's one value cannot be read.
+    installStoreFaults([{ method: 'getItem', key: (k) => k === getDraftValueKey(KEY_B) }]);
     view.rerender(<Harness instance={B} pressOnCommit={null} />);
     await settle();
     expect(getTextarea().value).toBe('');
@@ -200,10 +201,10 @@ describe('[#4604 4 回目・5 回目] a switch that cannot read the new draft', 
     window.localStorage.setItem(KEY_A, PLAIN);
     const view = render(<Harness instance={A} pressOnCommit={null} />);
     await settle();
-    const faults = installStoreFaults([{ method: 'getItem', key: (k) => k === KEY_B }]);
+    const faults = installStoreFaults([{ method: 'getItem', key: (k) => k === getDraftValueKey(KEY_B) }]);
     view.rerender(<Harness instance={B} pressOnCommit={null} />);
     await settle(600);
-    expect(rawStore().get(KEY_B)).toBeNull();
+    expect(rawStore().get(getDraftValueKey(KEY_B))).toBeNull();
     faults.restore();
     view.rerender(<Harness instance={A} pressOnCommit={null} />);
     await settle();
@@ -211,7 +212,7 @@ describe('[#4604 4 回目・5 回目] a switch that cannot read the new draft', 
     await settle();
     expect(getTextarea().value).toBe('');
     expect(screen.queryByTestId('message-input-draft-unreadable')).toBeNull();
-    expect(rawStore().get(KEY_A)).toBe(PLAIN);
+    expect(storedDraft(KEY_A).text).toBe(PLAIN);
   });
 
   it('the previous draft\'s waiting save cannot be written at the switch: a toast says so', async () => {
@@ -219,7 +220,7 @@ describe('[#4604 4 回目・5 回目] a switch that cannot read the new draft', 
     const view = render(<Harness instance={A} pressOnCommit={null} showToast={toast} />);
     await settle();
     fireEvent.change(getTextarea(), { target: { value: 'typed for A' } });
-    installStoreFaults([{ method: 'setItem', key: (k) => k === KEY_A }]);
+    installStoreFaults([{ method: 'setItem', key: (k) => k === getDraftValueKey(KEY_A) }]);
     view.rerender(<Harness instance={B} pressOnCommit={null} showToast={toast} />);
     await settle();
     expect(toast).toHaveBeenCalledWith('前の下書きを保存できませんでした', 'warning');
@@ -233,7 +234,7 @@ describe('[#4604 4 回目・5 回目] a switch that cannot read the new draft', 
     view.rerender(<Harness instance={B} pressOnCommit={null} showToast={toast} />);
     await settle();
     expect(toast).not.toHaveBeenCalled();
-    expect(rawStore().get(KEY_A)).toBe('typed for A');
+    expect(storedDraft(KEY_A).text).toBe('typed for A');
   });
 });
 
@@ -247,8 +248,8 @@ describe('[#4604 N-6] a character typed between the commit and the restore', () 
     await settle();
     expect(getTextarea().value).toBe('b text\n\nx');
     await settle(600);
-    expect(rawStore().get(KEY_B)).toBe('b text\n\nx');
-    expect(rawStore().get(KEY_A)).toBe(PLAIN);
+    expect(storedDraft(KEY_B).text).toBe('b text\n\nx');
+    expect(storedDraft(KEY_A).text).toBe(PLAIN);
   });
 });
 
@@ -265,6 +266,6 @@ describe('[#4604 r3 PS-1] a StrictMode mount restores the stored text once', () 
     await settle();
     expect(getTextarea().value).toBe('abc');
     await settle(600);
-    expect(window.localStorage.getItem(KEY_A)).toBe('abc');
+    expect(storedDraft(KEY_A).text).toBe('abc');
   });
 });

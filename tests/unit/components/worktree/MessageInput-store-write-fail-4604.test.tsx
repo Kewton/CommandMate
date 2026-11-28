@@ -24,7 +24,7 @@ import { MessageInput } from '@/components/worktree/MessageInput';
 import { ApiError } from '@/lib/api-client';
 import { mockCommandGroups } from '@tests/helpers/message-input-test-utils';
 import { getInstanceDraftKey, readRetargetTagState, readRetargetTags, readRetargetUnstorable } from '@/lib/drafts/message-draft';
-import { installStoreFaults, isRetargetKey, releasePageMarks, type StoreFaultRule } from '@tests/helpers/draft-store-fault-4604';
+import { installStoreFaults, isDraftValueKey, releasePageMarks, shortValueLength, type StoreFaultRule } from '@tests/helpers/draft-store-fault-4604';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 vi.mock('next-intl', async () => {
@@ -121,8 +121,10 @@ async function arrange(rules: StoreFaultRule[]) {
 
 describe('[#4604 a P2-2] the 409\'s tag cannot be written: the other composer of the draft asks', () => {
   it.each<[string, StoreFaultRule[], 'short' | 'page']>([
-    ['the store is full (a long :retarget value throws)', [{ method: 'setItem', key: isRetargetKey, overBytes: 60 }], 'short'],
-    ['every :retarget setItem throws', [{ method: 'setItem', key: isRetargetKey }], 'page'],
+    // Issue #4604 S13: the tag goes into the draft's one value — the rules pick its key (the names are the
+    // cases of before: a value with the tag does not fit, no value goes in).
+    ['the store is full (a long :retarget value throws)', [{ method: 'setItem', key: isDraftValueKey, overBytes: shortValueLength(TEXT) }], 'short'],
+    ['every :retarget setItem throws', [{ method: 'setItem', key: isDraftValueKey }], 'page'],
     ['every setItem throws', [{ method: 'setItem' }], 'page'],
   ])('%s — Enter in the second composer: POST 0 and the question', async (_name, rules, left) => {
     const faults = await arrange(rules);
@@ -147,7 +149,7 @@ describe('[#4604 a P2-2] the 409\'s tag cannot be written: the other composer of
   });
 
   it('a yes in the second composer sends once to this To and lets go of the generation it saw', async () => {
-    const faults = await arrange([{ method: 'setItem', key: isRetargetKey }]);
+    const faults = await arrange([{ method: 'setItem', key: isDraftValueKey }]);
     act(() => {
       fireEvent.keyDown(ta('two'), { key: 'Enter', code: 'Enter' });
     });

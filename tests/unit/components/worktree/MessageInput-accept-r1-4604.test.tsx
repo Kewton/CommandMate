@@ -26,14 +26,26 @@ import { MessageInput } from '@/components/worktree/MessageInput';
 import { ApiError } from '@/lib/api-client';
 import { mockCommandGroups } from '@tests/helpers/message-input-test-utils';
 import {
+  getDraftValueKey,
   getInstanceDraftKey,
   getRetargetTagKey,
   newRetargetTag,
   readRetargetTagState,
+  readRetargetTags,
   returnRetargetedText,
   type RetargetTag,
 } from '@/lib/drafts/message-draft';
-import { installStoreFaults, isRetargetKey, otherTabWrites, rawStore, releasePageMarks, type StoreFaultRule } from '@tests/helpers/draft-store-fault-4604';
+import {
+  installStoreFaults,
+  isDraftValueKey,
+  otherTabReleases,
+  otherTabWritesDraft,
+  rawStore,
+  releasePageMarks,
+  shortValueLength,
+  storedDraft,
+  type StoreFaultRule,
+} from '@tests/helpers/draft-store-fault-4604';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 vi.mock('next-intl', async () => {
@@ -62,6 +74,8 @@ const I2 = 'codex-3';
 const KEY = getInstanceDraftKey(WT, I);
 const KEY2 = getInstanceDraftKey(WT, I2);
 const TAG_KEY = getRetargetTagKey(KEY);
+/** Issue #4604 S13: the draft's one value (its text and its marks). */
+const VALUE_KEY = getDraftValueKey(KEY);
 const TEXT = 'TABS tile hello';
 const ORIGINAL = { instanceId: I, cliToolId: 'codex' };
 
@@ -131,14 +145,15 @@ describe('[#4604 accept r1 T-F1] another tab sent the draft after a yes: this ta
     await settle();
     expect(ta('b').value).toBe(TEXT);
     // Tab A: its send to X was stopped by the fence — its mark goes into the store (B hears the event).
-    otherTabWrites(TAG_KEY, aMarks);
+    // Issue #4604 S13: tab A writes the draft's one value (its text with the mark).
+    const marks = JSON.parse(aMarks) as RetargetTag[] | { unknown: string };
+    otherTabWritesDraft(KEY, Array.isArray(marks) ? { text: TEXT, tags: marks } : { text: TEXT, unknown: marks.unknown });
     await settle();
     // Both tabs read the roster again: X's tool changed.
     view.rerender(<One tool="claude" />);
     await settle();
-    // Tab A: asked, said yes and sent (POST 1 in A) — its text goes first, then the marks it saw.
-    otherTabWrites(KEY, null);
-    otherTabWrites(TAG_KEY, null);
+    // Tab A: asked, said yes and sent (POST 1 in A) — its value goes (its text and the marks it saw).
+    otherTabReleases(KEY);
     await settle();
     expect(ta('b').value).toBe(TEXT);
     return view;
@@ -184,8 +199,8 @@ describe('[#4604 accept r1 T-F1] another tab sent the draft after a yes: this ta
     window.localStorage.setItem(TAG_KEY, JSON.stringify([tag('t-a')]));
     render(<One tool="claude" />);
     await settle();
-    otherTabWrites(KEY, null);
-    otherTabWrites(TAG_KEY, null);
+    // Issue #4604 S13: tab A's send lets the draft's one value go (its text and its marks together).
+    otherTabReleases(KEY);
     await settle();
     enter('b');
     await settle(30);
@@ -225,7 +240,8 @@ describe('[#4604 accept r1 T-F2] only the short "unknown" went in: a toast says 
   });
 
   it('a long :retarget value throws (U1-1): the new toast, not the old one; the other composer and a fresh reader ask (POST 0)', async () => {
-    const { faults } = await arrange([{ method: 'setItem', key: isRetargetKey, overBytes: 60 }]);
+    // Issue #4604 S13: a value with the tag does not fit; the short value (the text, "unknown") does.
+    const { faults } = await arrange([{ method: 'setItem', key: isDraftValueKey, overBytes: shortValueLength(TEXT) }]);
     expect(readRetargetTagState(KEY).known).toBe(false);
     expect(toasted(PARTIAL_JA)).toBe(true);
     expect(toasted(UNSTORED_JA)).toBe(false);
@@ -247,7 +263,7 @@ describe('[#4604 accept r1 T-F2] only the short "unknown" went in: a toast says 
   });
 
   it('not even the "unknown" goes in: the old toast only', async () => {
-    await arrange([{ method: 'setItem', key: isRetargetKey }]);
+    await arrange([{ method: 'setItem', key: isDraftValueKey }]);
     expect(toasted(UNSTORED_JA)).toBe(true);
     expect(toasted(PARTIAL_JA)).toBe(false);
   });
@@ -261,7 +277,7 @@ describe('[#4604 accept r1 T-F2] only the short "unknown" went in: a toast says 
     window.localStorage.setItem(KEY, '');
     render(<One tool="claude" />);
     await settle();
-    const faults = installStoreFaults([{ method: 'setItem', key: isRetargetKey, overBytes: 60 }]);
+    const faults = installStoreFaults([{ method: 'setItem', key: isDraftValueKey, overBytes: shortValueLength(TEXT) }]);
     let handed = false;
     act(() => {
       handed = returnRetargetedText(KEY, { text: TEXT, tag: newRetargetTag(ORIGINAL) });
@@ -284,9 +300,17 @@ describe('[#4604 accept r1 T-F3] the write-backs put the mark back into the stor
     window.localStorage.setItem(TAG_KEY, JSON.stringify([tag('t-held')]));
     render(<One tool="claude" />);
     await settle();
-    otherTabWrites(TAG_KEY, null);
+    otherTabReleases(KEY);
     await settle();
-    expect(JSON.parse(rawStore().get(TAG_KEY) ?? 'null')).toEqual([tag('t-held')]);
+    // Issue #4604 S13 (ウ): nothing is written back from the event (#4616: two tabs never write back and
+    // forth); the composer's next save writes the marks it holds with its text, in the one value.
+    expect(rawStore().get(VALUE_KEY)).toBeNull();
+    act(() => {
+      fireEvent.change(ta('b'), { target: { value: `${TEXT} more` } });
+    });
+    await settle(600);
+    expect(readRetargetTags(KEY)).toEqual([tag('t-held')]);
+    expect(storedDraft(KEY).text).toBe(`${TEXT} more`);
   });
 
   it('M2 — the switch: the store lost the tags before its event came, the tile switches: the previous key has them again', async () => {
@@ -294,11 +318,13 @@ describe('[#4604 accept r1 T-F3] the write-backs put the mark back into the stor
     window.localStorage.setItem(TAG_KEY, JSON.stringify([tag('t-held')]));
     const view = render(<One tool="claude" />);
     await settle();
-    // Another tab's release, whose `StorageEvent` has not come yet: the store alone changed.
-    rawStore().remove(TAG_KEY);
+    // Another tab's release, whose `StorageEvent` has not come yet: the store alone changed (Issue #4604
+    // S13: the draft's one value went).
+    rawStore().remove(VALUE_KEY);
     view.rerender(<One tool="claude" instanceId={I2} />);
     await settle();
-    expect(JSON.parse(rawStore().get(TAG_KEY) ?? 'null')).toEqual([tag('t-held')]);
+    // S13 (ウ, §1.10 決め 5): the switch writes the previous draft once, with the marks it holds.
+    expect(readRetargetTags(KEY)).toEqual([tag('t-held')]);
   });
 });
 
@@ -321,11 +347,12 @@ describe('[#4604 accept r1 T-F3] the write-backs put the mark back into the stor
  */
 
 describe('[#4604 accept r1c] P1 — the marks a composer took in are not let go by its own send', () => {
-  it('a composer with a new text takes in another tab\'s tag, asks, says yes and sends: the store keeps the tag', async () => {
+  it('a composer with a new text takes in another tab\'s tag, asks, says yes and sends: the store ends empty (S13: the tag goes with the text)', async () => {
     window.localStorage.setItem(KEY, 'a new text');
     render(<One tool="claude" name="a" />);
     await settle();
-    otherTabWrites(TAG_KEY, JSON.stringify([tag('t-a')]));
+    // Issue #4604 S13: another tab writes the draft's one value.
+    otherTabWritesDraft(KEY, { text: 'a new text', tags: [tag('t-a')] });
     await settle();
     enter('a');
     await settle(30);
@@ -334,7 +361,9 @@ describe('[#4604 accept r1c] P1 — the marks a composer took in are not let go 
     yes('a');
     await settle(30);
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(rawStore().get(TAG_KEY) ?? 'null')).toEqual([tag('t-a')]);
+    // S13 (ウ): a composer's send lets the draft's value go — its text and the marks it holds (the ones it
+    // took in too: no mark is told apart by where it came from any more).
+    expect(rawStore().get(VALUE_KEY)).toBeNull();
   });
 });
 
@@ -376,10 +405,12 @@ describe('[#4604 accept r1c] two tabs (real composers, a storage-event bridge): 
     const realGet = Storage.prototype.getItem;
     const realSet = Storage.prototype.setItem;
     const realRemoveItem = Storage.prototype.removeItem;
+    // Issue #4604 S13: the draft's one value is what the tabs write.
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
-      if (key === TAG_KEY) {
-        // U1-1: the store is full — a long `:retarget` value throws, the short "unknown" fits.
-        if (fullStore && value.length > 60) throw new DOMException('full', 'QuotaExceededError');
+      if (key === VALUE_KEY) {
+        // U1-1: the store is full — a value with the tag throws, the short one (the text, "unknown") fits.
+        const parsed = JSON.parse(value) as { text: string; sendMark: { text: string; target: string } | null };
+        if (fullStore && value.length > shortValueLength(parsed.text, parsed.sendMark)) throw new DOMException('full', 'QuotaExceededError');
         const oldValue = realGet.call(this, key);
         realSet.call(this, key, value);
         queue.push({ writer: actor, oldValue, newValue: value });
@@ -388,7 +419,7 @@ describe('[#4604 accept r1c] two tabs (real composers, a storage-event bridge): 
       realSet.call(this, key, value);
     });
     vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, key: string) {
-      if (key === TAG_KEY) {
+      if (key === VALUE_KEY) {
         const oldValue = realGet.call(this, key);
         realRemoveItem.call(this, key);
         if (oldValue !== null) queue.push({ writer: actor, oldValue, newValue: null });
@@ -409,7 +440,7 @@ describe('[#4604 accept r1c] two tabs (real composers, a storage-event bridge): 
         actor = slot.tab;
         const listener = slot.listener;
         act(() => {
-          listener(new StorageEvent('storage', { key: TAG_KEY, oldValue: write.oldValue, newValue: write.newValue, storageArea: window.localStorage }));
+          listener(new StorageEvent('storage', { key: VALUE_KEY, oldValue: write.oldValue, newValue: write.newValue, storageArea: window.localStorage }));
         });
         actor = null;
       }
@@ -452,11 +483,7 @@ describe('[#4604 accept r1c] two tabs (real composers, a storage-event bridge): 
   }
 
   /** r1d: `bTypesFirst` — B types (its save runs) before its first Enter, as a person who edits it does. */
-  /**
-   * r1d: `pinEveryRound` — instead of the asking ending, pin that each of three rounds asks in both tabs
-   * (and each send still goes once, after its yes): today's behaviour of a known limit.
-   */
-  async function u41(full: boolean, bTypesFirst = false, pinEveryRound = false) {
+  async function u41(full: boolean, bTypesFirst = false) {
     window.localStorage.setItem(KEY, TEXT);
     sendMessageMock.mockRejectedValueOnce(fence());
     const view = render(<Tabs tool="codex" />);
@@ -490,17 +517,10 @@ describe('[#4604 accept r1c] two tabs (real composers, a storage-event bridge): 
     await as('b', () => yes('b'));
     expect(sendMessageMock).toHaveBeenCalledTimes(3);
     // The asking ends: within three rounds of new texts, a round where neither tab asks; the store ends empty.
-    if (pinEveryRound) {
-      const rounds: Array<Record<Tab, boolean>> = [];
-      for (let i = 0; i < 3; i += 1) rounds.push(await round());
-      expect(rounds).toEqual([{ a: true, b: true }, { a: true, b: true }, { a: true, b: true }]);
-      expect(sendMessageMock).toHaveBeenCalledTimes(9);
-      return;
-    }
     let last: Record<Tab, boolean> = { a: true, b: true };
     for (let i = 0; i < 3 && (last.a || last.b); i += 1) last = await round();
     expect(last).toEqual({ a: false, b: false });
-    expect(rawStore().get(TAG_KEY)).toBeNull();
+    expect(rawStore().get(VALUE_KEY)).toBeNull();
   }
 
   it('a list tag (the store works)', async () => {
@@ -517,12 +537,13 @@ describe('[#4604 accept r1c] two tabs (real composers, a storage-event bridge): 
     await u41(false, true);
   }, BRIDGE_TIMEOUT_MS);
 
-  // 既知の限界（人の決定 2026-11-27、#4604 コメント 7212549796、#4616 で扱う、#4604 受け入れ r1d）: 保存の空きが足りず短い「分からない」しか書けない
-  // 時、2 つのタブで打っては送ると毎回確かめる（安全側）。Each tab's save makes the "unknown" it took in its
-  // own (a new generation), the other tab takes that in, and a yes to an "unknown" is for one send — so
-  // while both tabs type before they send, every send asks. Pinned as today's behaviour (not an end).
-  it('INV-S1 の広げ — the short "unknown", B types before its first send: while both tabs type then send, every send asks (known limit, 人の決定 2026-11-27、#4604 コメント 7212549796, #4616 で扱う)', async () => {
-    await u41(true, true, true);
+  // #4616 (the known limit of 人の決定 2026-11-27、#4604 コメント 7212549796, gone with #4604 S13's one value): the
+  // short "unknown" only, two tabs typing then sending. Before, each tab's save made the "unknown" it took in
+  // its own (a new generation) and wrote it back, the other tab took that in, and every send asked. Now
+  // nothing is written back from an event and a save writes the generation the composer holds: the asking
+  // ends, the store ends empty (the same as the list tag).
+  it('INV-S1 の広げ — the short "unknown", B types before its first send: the asking ends (#4616: no more write-back and forth)', async () => {
+    await u41(true, true);
   }, BRIDGE_TIMEOUT_MS);
 });
 
@@ -560,24 +581,24 @@ describe('[#4604 accept r1d] INV-S1 の広げ — the text B saves keeps the mar
     fireEvent.change(ta(name), { target: { value: v } });
   });
   /** B shows the draft; A's 409 puts `aMarks` in (event); the tool changes; A sends (event); B types and saves. */
-  async function tookInThenASendsThenBSaves(aMarks: string) {
+  // Issue #4604 S13: tab A writes the draft's one value (its text with the marks), and its send lets it go.
+  async function tookInThenASendsThenBSaves(aMarks: { tags?: RetargetTag[]; unknown?: string }) {
     window.localStorage.setItem(KEY, TEXT);
     const view = render(<One tool="codex" />);
     await settle();
-    otherTabWrites(TAG_KEY, aMarks);
+    otherTabWritesDraft(KEY, { text: TEXT, ...aMarks });
     await settle();
     view.rerender(<One tool="claude" />);
     await settle();
-    otherTabWrites(KEY, null);
-    otherTabWrites(TAG_KEY, null);
+    otherTabReleases(KEY);
     await settle();
     type('b', `${TEXT} more`);
     await settle(700);
-    expect(rawStore().get(KEY)).toBe(`${TEXT} more`);
+    expect(storedDraft(KEY).text).toBe(`${TEXT} more`);
     return view;
   }
-  const LIST = JSON.stringify([tag('t-a')]);
-  const UNKNOWN = JSON.stringify({ unknown: 'g-a', tags: [] });
+  const LIST = { tags: [tag('t-a')] };
+  const UNKNOWN = { unknown: 'g-a' };
 
   it('Q1: the saved text has its mark in the store; after a reload, Enter asks (POST 0)', async () => {
     await tookInThenASendsThenBSaves(LIST);
@@ -637,7 +658,7 @@ describe('[#4604 accept r1d] INV-S1 の広げ — the text B saves keeps the mar
     yes('b');
     await settle(30);
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
-    expect(rawStore().get(TAG_KEY)).toBeNull();
+    expect(rawStore().get(VALUE_KEY)).toBeNull();
     type('b', 'next one');
     await settle(700);
     enter('b');
@@ -650,7 +671,7 @@ describe('[#4604 accept r1d] INV-S1 の広げ — the text B saves keeps the mar
     window.localStorage.setItem(KEY, 'b text');
     render(<One tool="claude" />);
     await settle();
-    otherTabWrites(TAG_KEY, UNKNOWN);
+    otherTabWritesDraft(KEY, { text: 'b text', ...UNKNOWN });
     await settle();
     const asks: boolean[] = [];
     for (let i = 0; i < 3; i += 1) {
@@ -666,6 +687,6 @@ describe('[#4604 accept r1d] INV-S1 の広げ — the text B saves keeps the mar
     }
     expect(asks.at(-1)).toBe(false);
     expect(sendMessageMock).toHaveBeenCalledTimes(3);
-    expect(rawStore().get(TAG_KEY)).toBeNull();
+    expect(rawStore().get(VALUE_KEY)).toBeNull();
   });
 });

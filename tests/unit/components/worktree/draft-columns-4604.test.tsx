@@ -50,6 +50,7 @@ import { MessageInput } from '@/components/worktree/MessageInput';
 import { ApiError } from '@/lib/api-client';
 import { mockCommandGroups } from '@tests/helpers/message-input-test-utils';
 import {
+  getDraftValueKey,
   getInstanceDraftKey,
   getRetargetTagKey,
   newRetargetTag,
@@ -60,7 +61,19 @@ import {
   type RetargetOp,
   type RetargetStorage,
 } from '@/lib/drafts/message-draft';
-import { installStoreFaults, isRetargetKey, otherTabWrites, rawStore, releasePageMarks, type StoreFaultRule } from '@tests/helpers/draft-store-fault-4604';
+import {
+  carriesMark,
+  draftValue,
+  installStoreFaults,
+  isDraftValueKey,
+  otherTabReleases,
+  otherTabWrites,
+  rawDraft,
+  rawStore,
+  releasePageMarks,
+  shortValueLength,
+  type StoreFaultRule,
+} from '@tests/helpers/draft-store-fault-4604';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 vi.mock('next-intl', async () => {
@@ -116,11 +129,13 @@ const ta = (c: 'X' | 'Y') => within(screen.getByTestId(c)).getByTestId('message-
 const q = (c: 'X' | 'Y', id: string) => within(screen.getByTestId(c)).queryByTestId(id);
 
 type Fault = 'none' | 'rtSet' | 'rtGet' | 'textGet2';
+// Issue #4604 S13: a draft is one value (`<K>:value`) — the faults pick its key: a value with a mark cannot
+// be written (the shape of before's `:retarget` setItem), the value cannot be read, i2's value cannot be read.
 const FAULTS: Record<Fault, StoreFaultRule[]> = {
   none: [],
-  rtSet: [{ method: 'setItem', key: isRetargetKey }],
-  rtGet: [{ method: 'getItem', key: isRetargetKey }],
-  textGet2: [{ method: 'getItem', key: (k) => k === K2 }],
+  rtSet: [{ method: 'setItem', key: isDraftValueKey, value: carriesMark }],
+  rtGet: [{ method: 'getItem', key: isDraftValueKey }],
+  textGet2: [{ method: 'getItem', key: (k) => k === getDraftValueKey(K2) }],
 };
 
 interface Target {
@@ -162,19 +177,15 @@ class Ledger {
   checkStore(after: string) {
     if (this.storeFailed) return;
     for (const key of [K1, K2]) {
-      const text = rawStore().get(key) ?? '';
-      const raw = rawStore().get(getRetargetTagKey(key));
-      let marks: unknown = null;
-      try {
-        marks = raw === null ? null : JSON.parse(raw);
-      } catch {
-        marks = 'junk';
-      }
-      const asksAll = marks !== null && !Array.isArray(marks);
+      // Issue #4604 S13: the text and its marks, from the draft's one value (past the faults).
+      const stored = rawDraft(key);
+      const text = stored.text;
+      const marks = stored.marks;
+      const asksAll = marks.kind !== 'absent' && marks.kind !== 'list';
       for (const w of text.split(/\s+/)) {
         const original = this.returned.get(w);
         if (!w || !this.handedBack.has(w) || !original || asksAll) continue;
-        const tags = Array.isArray(marks) ? (marks as Array<{ original?: Target }>) : [];
+        const tags: Array<{ original?: Target }> = marks.kind === 'list' ? marks.tags : [];
         if (tags.some((tag) => tag.original !== undefined && same(tag.original, original))) continue;
         this.violations.push(`after ${after}: ${w} is stored under ${key === K1 ? 'i1' : 'i2'} without its mark`);
       }
@@ -275,8 +286,12 @@ function otherTabRoad(draftKey: string, op: RetargetOp, full = false): void {
   const storage: RetargetStorage = {
     getItem: (key) => rawStore().get(key),
     setItem: (key, value) => {
-      // r1d (`otherTab409u`): that tab's store is full — a long `:retarget` value does not go in.
-      if (full && value.length > 60) throw new Error('full');
+      // r1d (`otherTab409u`): that tab's store is full — a value with the tag does not go in (S13: the
+      // draft's one value; its short value — the text, "unknown" — does).
+      if (full && key === getDraftValueKey(draftKey)) {
+        const parsed = JSON.parse(value) as { text: string; sendMark: { text: string; target: string } | null };
+        if (value.length > shortValueLength(parsed.text, parsed.sendMark)) throw new Error('full');
+      }
       otherTabWrites(key, value);
     },
     removeItem: (key) => otherTabWrites(key, null),
@@ -327,12 +342,12 @@ async function step(word: Word, arg = 0) {
       break;
     case 'otherTab': {
       // Another tab sent i1's draft after its person said yes (to i1's To now): what it saw is covered.
-      const text = rawStore().get(K1) ?? '';
+      // Issue #4604 S13: it read the draft's one value, and its send lets the value go.
+      const text = rawDraft(K1).text;
       for (const w of text.split(/\s+/)) if (ledger.returned.has(w)) ledger.cover('otherTab', w, { instanceId: I1, cliToolId: world.tools[I1] });
       for (const w of text.split(/\s+/)) if (w) ledger.posts.push({ content: w, to: { instanceId: I1, cliToolId: world.tools[I1] } });
       act(() => {
-        otherTabWrites(K1, null);
-        otherTabWrites(getRetargetTagKey(K1), null);
+        otherTabReleases(K1);
       });
       break;
     }
@@ -388,7 +403,7 @@ async function step(word: Word, arg = 0) {
       // Another tab sent i1's stored text and the fence stopped it: its tag goes into the store (through
       // the one road, in that tab), with the event this page hears; the words are handed back there.
       const original = { instanceId: I1, cliToolId: world.tools[I1] };
-      for (const w of (rawStore().get(K1) ?? '').split(/\s+/)) {
+      for (const w of rawDraft(K1).text.split(/\s+/)) {
         if (!w) continue;
         if (!ledger.returned.has(w)) ledger.returned.set(w, original);
         ledger.handedBack.add(w);
@@ -441,7 +456,8 @@ async function expectNothingLost() {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(600);
   });
-  const places = [ta('X').value, rawStore().get(K1) ?? '', rawStore().get(K2) ?? '', ...ledger.posts.map((p) => p.content)].join(' ').split(/\s+/);
+  // Issue #4604 S13: the stored texts are the drafts' one values.
+  const places = [ta('X').value, rawDraft(K1).text, rawDraft(K2).text, ...ledger.posts.map((p) => p.content)].join(' ').split(/\s+/);
   const lost = [...ledger.words].filter((w) => !places.includes(w) && !ledger.dropped.has(w));
   if (lost.length > 0) expect(toast).toHaveBeenCalled();
 }
@@ -590,7 +606,8 @@ describe('[#4604] fixed columns', () => {
   it('F20 (N-1): a plain draft, a full store (the tag\'s value does not fit), the awaited 409 — remount, the tool changes: Enter asks', async () => {
     await step('type');
     await step('wait');
-    faults.set([{ method: 'setItem', key: isRetargetKey, overBytes: 60 }]);
+    // Issue #4604 S13: a full store — the draft's value with the tag does not fit, its short value does.
+    faults.set([{ method: 'setItem', key: isDraftValueKey, overBytes: shortValueLength(ta('X').value) }]);
     await step('409');
     await step('enter');
     faults.set([]);
@@ -614,9 +631,9 @@ describe('[#4604] fixed columns', () => {
       const r = `r${++seq}`;
       ledger.words.add(r);
       ledger.returned.set(r, { instanceId: I1, cliToolId: 'codex' });
-      const raw = rawStore();
-      raw.set(K1, `${raw.get(K1) ?? ''}\n\n${r}`);
-      raw.set(getRetargetTagKey(K1), JSON.stringify([{ id: 'other-tab', original: { instanceId: I1, cliToolId: 'codex' } }]));
+      // Issue #4604 S13: that tab writes the draft's one value (the text and its tag together).
+      const before = rawDraft(K1).text;
+      rawStore().set(getDraftValueKey(K1), draftValue({ text: `${before}\n\n${r}`, tags: [{ id: 'other-tab', original: { instanceId: I1, cliToolId: 'codex' } }] }));
       faults.set(FAULTS.rtGet);
     };
     for (const w of ta('X').value.split(/\s+/)) if (w) ledger.returned.set(w, xTo());

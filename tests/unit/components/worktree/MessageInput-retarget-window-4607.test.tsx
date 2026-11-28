@@ -28,7 +28,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, screen, act, cleanup } from '@testing-library/react';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import { mockCommandGroups, getTextarea, typeMessage, pressEnter } from '@tests/helpers/message-input-test-utils';
-import { getInstanceDraftKey, getRetargetTagKey, getSplitDraftKey } from '@/lib/drafts/message-draft';
+import { getInstanceDraftKey, getRetargetTagKey, getSplitDraftKey, readRetargetStore } from '@/lib/drafts/message-draft';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 vi.mock('next-intl', async () => {
@@ -288,7 +288,8 @@ describe('[#4607 r4] a press between the commit of a To change and its passive e
       expect(sendMessageMock).not.toHaveBeenCalled();
       expect(screen.queryByTestId('message-input-retarget-confirm')).toBeNull();
       expect(screen.queryByTestId('session-start-brief-dialog')).toBeNull();
-      if (store === 'readable') expect(window.localStorage.getItem(tagKey)).not.toBeNull();
+      // Issue #4604 S13: the marks are in the draft's one value — still the list.
+      if (store === 'readable') expect(readRetargetStore(shape.key).kind).toBe('list');
       return;
     }
     if (oracle.posts.length === 0) {
