@@ -91,10 +91,11 @@ import path from 'node:path';
 import process from 'node:process';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { appendRecord, findLatest, inItem, latestByStage, readRecords, unmetStage } from './run-log.mjs';
+import { appendRecord, findLatest, gatePrecheck, inItem, latestByStage, readRecords, unmetStage } from './run-log.mjs';
 import { verifyEnvState } from './env-manifest.mjs';
+import { heavyWaiter } from './heavy-runs.mjs';
 import { itemProblem } from './execution-key.mjs';
-import { acquireMachineLockSync, describeOwner, lockPathOf, readOwner } from './machine-lock-sync.mjs';
+import { acquireMachineLockSync, describeOwner, lockPathOf, readHolder } from './machine-lock-sync.mjs';
 import {
   BUILD_STEPS,
   TO_CI,
@@ -395,6 +396,7 @@ function validateShared(options) {
  *   lockSleep?: (ms: number) => void,
  *   acquireMergeLock?: typeof acquireMachineLockSync,
  *   mergeOne?: (options: any, deps: any) => number,
+ *   waitHeavy?: () => void,   before the inner precheck (#4631); only the entry gives the real one
  * }} [deps]
  * @returns {number} exit code
  */
@@ -575,7 +577,8 @@ export function mergeOne(o, deps) {
     // The precheck is recorded per HEAD, so a HEAD pushed earlier (publish-pr.mjs
     // after a refresh) is checked here too unless it already passed — in this
     // environment (#3883 N9: precheck.mjs runs it again when the inputs moved).
-    const headPrecheck = latestByStage(records, issue, item).precheck;
+    // precheck.mjs's own record, never a line added by hand (#4589 run-log.mjs gatePrecheck).
+    const headPrecheck = gatePrecheck(records, { issue, item });
     const precheckEnv = headPrecheck ? verifyEnvState(headPrecheck, { runDir: o.runDir, worktree: o.worktree, home: deps.home ?? os.homedir() }) : null;
     if (precheckEnv?.state === 'unrecorded') log(`merge #${issue}: warning: precheck at ${head.slice(0, 7)}: ${precheckEnv.detail}`);
     for (const reason of deferred) log(`merge #${issue}: ${reason}`);
@@ -589,13 +592,15 @@ export function mergeOne(o, deps) {
       // precheck run on the published HEAD only, from the Issue's latest precheck=ok (any HEAD).
       // Without either the options would be guessed (kind lost → suppressions=skip): stop (#3527).
       const workPrecheck =
-        findLatest(records, { issue, item, stage: 'precheck', head: workHead, result: 'ok' }) ??
-        findLatest(records, { issue, item, stage: 'precheck', result: 'ok' });
+        gatePrecheck(records, { issue, item, head: workHead, result: 'ok' }) ??
+        gatePrecheck(records, { issue, item, result: 'ok' });
       if (!workPrecheck) {
         error(`merge #${issue}: no precheck=ok record to take the options from (kind etc.) — run precheck.mjs on the work HEAD first; not pushed`);
         return 1;
       }
       phase('precheck');
+      // No other heavy run on the machine before the precheck starts its own (#4631).
+      deps.waitHeavy?.();
       const code = (deps.runPrecheck ?? runPrecheck)(
         [
           '--run-dir', o.runDir, '--issues', o.issues, '--issue', String(issue), '--worktree', o.worktree,
@@ -641,7 +646,7 @@ export function mergeOne(o, deps) {
     // 5. The checks of this HEAD.
     phase('ci-wait');
     records = readRecords(o.runDir, o.issues).records;
-    const headPrecheckNow = findLatest(records, { issue, item, stage: 'precheck', head });
+    const headPrecheckNow = gatePrecheck(records, { issue, item, head });
     const needBuild = !builtLikeCi(headPrecheckNow);
     // The verify judged at the work HEAD (step 3, or again after the refresh): whether it ran the
     // full unit suite. A latest verify of another HEAD is not that one, and does not spare the wait (#4076).
@@ -889,7 +894,7 @@ function takeMergeLock(o, deps, recovered) {
 }
 
 function heldByLine(root, name, lock) {
-  const owner = readOwner(lockPathOf(root, name));
+  const owner = readHolder(lockPathOf(root, name));
   if (!owner) return lock.heldBy ?? 'nobody readable';
   return `${describeOwner(owner)}${owner.pgid ? ` (pgid ${owner.pgid})` : ''}, phase ${owner.phase ?? '-'}${owner.pr ? ` pr=#${owner.pr}` : ''}`;
 }
@@ -1185,7 +1190,7 @@ if (isMain) {
   if (process.env[INNER_ENV] === '1') {
     // Not inherited further: a merge-pr started by a child (a test) is an outer process of its own.
     delete process.env[INNER_ENV];
-    process.exit(main(process.argv.slice(2), { pgid: process.pid }));
+    process.exit(main(process.argv.slice(2), { pgid: process.pid, waitHeavy: heavyWaiter({ label: 'merge-pr' }) }));
   } else {
     runOuter(process.argv.slice(2)).then((code) => process.exit(code));
   }

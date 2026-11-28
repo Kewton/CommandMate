@@ -16,8 +16,11 @@
  *
  * ## Taking it off (M2)
  *
- * Only when the line sits exactly there: the first line of the text, or the
- * first line after a brief. Text with no envelope there — a relay body, a
+ * Only when the line sits exactly there: the first line of the text (after any
+ * leading blank lines), or the first line after a brief (which itself may follow
+ * leading blank lines). Claude Code records a multi-line tmux send as a paste
+ * with two newlines outside the wrapper (#4582), so the unwrapped text opens with
+ * `"\n\n"`. Text with no envelope there — a relay body, a
  * brief-only send, an operator's message quoting an envelope further down — is
  * returned unchanged (`null`), so nothing that never carried one reads
  * differently.
@@ -45,15 +48,17 @@ export function formatAskEnvelope(askId: string): string {
 }
 
 /**
- * Where the operator's part of `text` starts: after a session brief's closing
- * fence and its blank line, or 0 when the text does not open with a brief.
+ * Where the operator's part of `text` starts: past any leading blank lines
+ * (`\n` only, #4582), then after a session brief's closing fence and its blank
+ * line when the text opens with a brief there.
  */
 function bodyStart(text: string): number {
-  const open = BRIEF_OPEN.exec(text);
-  if (!open) return 0;
+  const lead = /^\n*/.exec(text)?.[0].length ?? 0;
+  const open = BRIEF_OPEN.exec(text.slice(lead));
+  if (!open) return lead;
   const close = `\ncmate-brief:${open[1]}>>>\n\n`;
-  const end = text.indexOf(close);
-  return end < 0 ? 0 : end + close.length;
+  const end = text.indexOf(close, lead);
+  return end < 0 ? lead : end + close.length;
 }
 
 /**
@@ -83,7 +88,10 @@ export interface StrippedAskEnvelope {
 
 /**
  * The envelope at its canonical place in `text`, and the text without it — or
- * null when there is none there (M2). Line endings are read as the transcript
+ * null when there is none there (M2). Leading blank lines in front of the
+ * envelope (or of the brief) are skipped and kept in the returned text (#4582):
+ * History compares prompts with blank lines at either end trimmed, so they do
+ * not change which row is adopted. Line endings are read as the transcript
  * keeps them (`\r\n` too); trailing blanks on the envelope line are tolerated.
  */
 export function stripAskEnvelope(text: string): StrippedAskEnvelope | null {

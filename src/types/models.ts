@@ -719,7 +719,12 @@ export function isAnswerablePromptData(
  * `sendOutcome: 'unknown'`, a 5xx without `sendOutcome`, or the request never
  * completed). Not retried directly: only a confirmed resend sends it again.
  */
-export type OptimisticSendState = 'sending' | 'error' | 'unknown';
+/*
+ * Issue #4606 r4: `held` = a send gate held it back (the `/sessions` tile's To was held after the send
+ * fence's 409) — not sent, not failed: it can be retried (or discarded) once the roster is read again.
+ * Render only (a pending row's own status stays `sending`).
+ */
+export type OptimisticSendState = 'sending' | 'error' | 'unknown' | 'held';
 
 /**
  * Issue #4503: the second argument of a pending row's retry. `confirmedResend` is the person's

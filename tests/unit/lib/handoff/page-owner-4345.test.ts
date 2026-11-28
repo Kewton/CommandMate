@@ -53,7 +53,7 @@ function respond(): Promise<Response> {
     response.text = never;
     return Promise.resolve(response);
   }
-  const body = shape >= 200 && shape < 300 ? { id: 'm1', timestamp: '2026-11-14T00:00:00.000Z', path: 'p', filename: 'f' } : { error: `e${shape}` };
+  const body = shape >= 200 && shape < 300 ? { id: 'm1', role: 'user', timestamp: '2026-11-14T00:00:00.000Z', path: 'p', filename: 'f' } : { error: `e${shape}` };
   return Promise.resolve(new Response(JSON.stringify(body), { status: shape, headers: { 'content-type': 'application/json' } }));
 }
 

@@ -90,7 +90,8 @@ afterEach(() => {
 
 const SOURCES = {
   bash: '.claude/skills/cmate-verify/scripts/verify-run.sh',
-  ts: 'src/lib/verification/machine-lock.ts',
+  // #4559 PR-2 (案 F, the (d) rows): TS's observers are the core's byte copy (machine-lock.ts imports it).
+  ts: 'src/lib/verification/machine-lock-sync-core.generated.ts',
   sync: 'scripts/orchestrate/machine-lock-sync.mjs',
 } as const;
 const read = (file: string) => fs.readFileSync(path.join(REPO, file), 'utf8');
@@ -315,7 +316,9 @@ describe('P2: the rmdir\'s reason reaches what the product shows', () => {
     writeOwner(path.join(lockRoot, `${name}.lock.gone-111-1`), deadOwner('dead-gone'));
     fs.mkdirSync(path.join(lockRoot, `${name}.queue`));
   };
-  const LINE = (name: string) => `unknown point=reclaim-rmdir path=${path.join(lockRoot, `${name}.lock`)} errno=EACCES`;
+  // #4559 PR-2 (#4559 comment 7183455133): the generation comes before the <lock> (design §6.1), so on a root that
+  // cannot be written the first unknown is the generation directory's (gen-dir-mkdir), and it is what is shown.
+  const LINE = (name: string) => `unknown point=gen-dir-mkdir path=${path.join(lockRoot, `${name}.gen`)} errno=EACCES`;
 
   beforeEach(async () => {
     db = new Database(':memory:');
@@ -405,7 +408,7 @@ describe('P2: the rmdir\'s reason reaches what the product shows', () => {
     const argv = ['--run-dir', path.join(tmp, 'runs', '2026-11-09'), '--issues', '4288', '--issue', '4288', '--worktree', '/wt'];
     expect(main(argv, deps)).toBe(EXIT_HELD);
     const lib = library as unknown as { unknown?: { point: string; path: string; code: string } };
-    expect(lib.unknown).toEqual({ point: 'reclaim-rmdir', path: path.join(lockRoot, `${HEAVY_MUTEX}.lock`), code: 'EACCES' });
+    expect(lib.unknown).toEqual({ point: 'gen-dir-mkdir', path: path.join(lockRoot, `${HEAVY_MUTEX}.gen`), code: 'EACCES' });
     const line = events.find((e) => e.includes(`tests ${HELD} (not run:`)) ?? '';
     expect(line).toContain(LINE(HEAVY_MUTEX));
   });
@@ -413,6 +416,10 @@ describe('P2: the rmdir\'s reason reaches what the product shows', () => {
 
 describe('the scan: a call inside an observer whose failure nothing reads (P1)', () => {
   it.each(IMPLS)('%s: none today', (impl) => {
+    // #4559 (the human's answer, #4559 comment 7180525760): the source read has at least one observer — an
+    // empty scan target cannot pass this row.
+    const defs = [...read(SOURCES[impl]).matchAll(impl === 'bash' ? /^([A-Za-z_][A-Za-z0-9_]*)\(\) \{/gm : /^(?:export )?(?:async )?function\*? ([A-Za-z_$][A-Za-z0-9_$]*)/gm)].map((m) => m[1]);
+    expect(defs.filter((fn) => OBSERVER_FUNCTIONS[impl](fn)).length).toBeGreaterThanOrEqual(1);
     expect(scanUncheckedCalls(impl, read(SOURCES[impl]))).toEqual([]);
   });
 
@@ -445,8 +452,9 @@ describe('the scan: a call inside an observer whose failure nothing reads (P1)',
 
   it.each(['ts', 'sync'] as const)('self-test (%s): a throwing call moved out of the observer\'s try is found', (impl) => {
     const source = read(SOURCES[impl]);
-    const marker = impl === 'ts' ? '      let text: string;\n' : '      let text;\n';
-    const legacy = source.replace(marker, `${marker}      ${impl === 'ts' ? '' : 'fs.'}readFileSync(file, 'utf8');\n`);
+    // #4559 PR-2: the ts source is the core's byte copy, so its text is the sync JS's.
+    const marker = '      let text;\n';
+    const legacy = source.replace(marker, `${marker}      fs.readFileSync(file, 'utf8');\n`);
     expect(legacy).not.toBe(source);
     const found = scanUncheckedCalls(impl, legacy);
     expect(found).toHaveLength(1);

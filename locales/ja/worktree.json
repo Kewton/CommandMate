@@ -22,7 +22,11 @@
     "showSlashCommands": "スラッシュコマンドを表示",
     "attachImage": "画像を添付",
     "sendMessage": "メッセージを送信",
-    "resizeHandle": "入力欄の高さを変更します。上下の矢印キーで調整し、ダブルクリックで自動の高さに戻します。"
+    "resizeHandle": "入力欄の高さを変更します。上下の矢印キーで調整し、ダブルクリックで自動の高さに戻します。",
+    "previousDraftNotSaved": "前の下書きを保存できませんでした",
+    "draftUnreadable": "下書きを読めませんでした",
+    "draftNotMoved": "下書きを移せませんでした。元のインスタンスの下書きに残っています。",
+    "sendTargetRefreshing": "宛先が替わりました。名簿を読み直しています"
   },
   "interrupt": {
     "stopProcessing": "処理を中断"
@@ -57,6 +61,7 @@
     "assistant": "アシスタント",
     "sending": "送信中…",
     "failedToSend": "送信に失敗しました",
+    "sendHeld": "送っていません（宛先が替わりました）。名簿の読み直しの後に再試行できます",
     "sendUnknown": {
       "status": "届いたかどうか分かりません",
       "guidance": "途中まで、または全部届いている場合があります。ターミナルの表示を確かめてから、必要なら送り直してください",
@@ -91,7 +96,9 @@
       "retargetConfirm": "この本文は {original} へ送る途中で止まったものです。宛先が {current} になっています。{current} へ送りますか？",
       "retargetConfirmYes": "送る",
       "retargetConfirmNo": "やめる",
-      "retargetConfirmUnreadable": "この本文が別の宛先へ送る途中で止まったものかどうか、確かめられませんでした（宛先の確認を読めません）。{current} へ送りますか？"
+      "retargetConfirmUnreadable": "この本文が別の宛先へ送る途中で止まったものかどうか、確かめられませんでした（宛先の確認を読めません）。{current} へ送りますか？",
+      "retargetUnstored": "宛先の確認を保存できません。ほかのタブ・再読み込みの後は確認なしに送られることがあります",
+      "retargetPartiallyStored": "宛先の確認を保存に書けませんでした。このタブとほかのタブは、送る前にもう一度確かめます"
     },
     "retrySending": "メッセージを再送信",
     "discard": "破棄",

@@ -1261,6 +1261,16 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
             <span>{t('conversation.failedToSend')}</span>
           </span>
         )}
+        {/* Issue #4606 r4: a send gate held it back (the tile's To is held) — not sent, not failed. */}
+        {sendState === 'held' && (
+          <span
+            data-testid="chat-optimistic-held"
+            className="flex items-center gap-1 text-xs text-muted-foreground"
+          >
+            <CircleHelp size={12} aria-hidden="true" />
+            <span>{t('conversation.sendHeld')}</span>
+          </span>
+        )}
 
         {sendState === 'unknown' ? (
           // Issue #4503: no ［再試行］ — the text may already be in the session. Check the terminal;
@@ -1303,7 +1313,7 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
               </button>
             )}
           </>
-        ) : sendState === 'sending' && message.optimisticAwaitingResponse ? null : sendState === 'error' ? (
+        ) : sendState === 'sending' && message.optimisticAwaitingResponse ? null : sendState === 'error' || sendState === 'held' ? (
           <>
             {onRetryPending && (
               <button

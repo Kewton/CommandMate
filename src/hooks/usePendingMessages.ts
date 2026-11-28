@@ -149,6 +149,20 @@ export type SendFn = (
   options: OptimisticSendOptions,
 ) => Promise<unknown>;
 
+/**
+ * Issue #4604＋#4606 r3c: what a {@link SendFn} resolves to when its gate did not send (the caller's
+ * hold of the To — no `POST /send` left). Not an error and not an outcome: the row stays, waiting —
+ * parked as not sent (`heldNotSent`: drawn with its [retry] / [discard], never resent on its own) —
+ * and goes when the person retries after the gate opens. Never returned by a caller with no gate.
+ */
+export interface SendHeldByGate {
+  readonly sendNotSent: 'held';
+}
+export const SEND_HELD_BY_GATE: SendHeldByGate = Object.freeze({ sendNotSent: 'held' as const });
+export function isSendHeldByGate(value: unknown): value is SendHeldByGate {
+  return typeof value === 'object' && value !== null && (value as { sendNotSent?: unknown }).sendNotSent === 'held';
+}
+
 export interface PendingMessage {
   /** Client-generated temporary id (also used as the bubble's message id). */
   tempId: string;
@@ -186,6 +200,11 @@ export interface PendingMessage {
    * session is back. `retry()` clears it.
    */
   heldNotSent?: boolean;
+  /**
+   * Issue #4606 r4: this row's latest attempt was not sent by the caller's gate (`SEND_HELD_BY_GATE`):
+   * drawn as `held` ("not sent", with [retry] / [discard]), not as a failure. Cleared by `retry()`.
+   */
+  gateHeld?: boolean;
   /**
    * Issue #4385: the last attempt was refused by the server because of the role (409
    * `roleRefusal`, nothing typed) — the reason the failed row shows. Cleared by `retry()`.
@@ -371,7 +390,9 @@ function computeReconciliation(
   const reconciledTempIds = new Set<string>();
   const consumedServerIds = new Set<string>();
   // Issue #4503: an `unknown` row's echo proves it was delivered after all.
-  const sending = pending.filter((p) => p.status === 'sending' || p.status === 'unknown');
+  // Issue #4606 r4: a row a send gate held back sent nothing on its latest attempt (and its earlier one
+  // was answered as not sent): a user message of the same text is another send, never its echo.
+  const sending = pending.filter((p) => !p.gateHeld && (p.status === 'sending' || p.status === 'unknown'));
   if (sending.length === 0) return { reconciledTempIds, consumedServerIds };
 
   const serverUser = serverMessages
@@ -425,7 +446,8 @@ function toChatMessage(p: PendingMessage, worktreeId: string): ChatMessage {
     // Issue #4345 1c-2: a parked message whose automatic resend was refused (`heldNotSent`) is
     // drawn as 'error' so the bubble offers retry / discard (both the PC card and the mobile bubble
     // show them for 'error' only). Nothing resends it on its own; retry is the person's.
-    optimisticState: p.heldNotSent ? 'error' : p.status,
+    // Issue #4606 r4: a row a send gate held back says so (not a failure); its buttons are the failed row's.
+    optimisticState: p.gateHeld ? 'held' : p.heldNotSent ? 'error' : p.status,
     ...(p.status === 'error' && p.roleRefusal ? { optimisticRoleRefusal: p.roleRefusal } : {}),
     ...(p.status === 'sending' && p.awaitingResponse && !p.heldNotSent ? { optimisticAwaitingResponse: true } : {}),
   };
@@ -657,7 +679,21 @@ export function usePendingMessages({
       attemptsInFlight.add(p);
       inFlightRef.current.set(p.tempId, attemptsInFlight);
       try {
-        await sendFnRef.current(p.content, p.options);
+        const result = await sendFnRef.current(p.content, p.options);
+        // Issue #4604＋#4606 r3c: the caller's gate did not send it — the row stays, waiting (not
+        // removed, not failed, not unknown): parked as not sent, until the person retries.
+        if (isSendHeldByGate(result)) {
+          if (attemptsRef.current.get(p.tempId) !== p) return;
+          clearTimer(p.tempId);
+          setPending((prev) =>
+            prev.map((cur) =>
+              cur.tempId === p.tempId
+                ? { ...cur, status: 'sending', queued: true, heldNotSent: true, gateHeld: true, accepted: false, awaitingResponse: false }
+                : cur,
+            ),
+          );
+          return;
+        }
         // Issue #4417: an answer to an attempt that is no longer the row's latest (retried,
         // discarded, confirmed) changes nothing on the row. The refetch still runs: its echo is
         // what confirms the row if this older attempt is the one that arrived.
@@ -814,6 +850,7 @@ export function usePendingMessages({
         accepted: false,
         autoResendAttempted: false,
         heldNotSent: false,
+        gateHeld: false,
         roleRefusal: undefined,
         awaitingResponse: false,
       };

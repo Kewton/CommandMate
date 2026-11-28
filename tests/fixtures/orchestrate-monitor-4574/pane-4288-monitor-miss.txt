@@ -1,0 +1,192 @@
+[38;5;174m ▐[48;5;16m▛███▛█[39m[49m   [1mClaude Code[0m [38;5;246mv2.1.330[39m
+[38;5;174m▝▜[48;5;16m█████[49m█▀[39m  [38;5;246mOpus 5.5 with medium effort · Claude Ultra[39m
+[38;5;174m ▝▝   ▝▝ [39m  [38;5;246m~/share/work/github_kewton/commandmate-issue-4288[39m
+
+
+[38;5;246m[48;5;237m❯ [38;5;231mセッションの起動とモデルの確認です（作業の依頼ではありません）。まだ何も実行せず、ファイルにも触らず、「OK」とだけ返してください。依頼は次のメッセージで送ります。[39m
+
+[38;5;231m[49m⏺[39m OK
+
+[38;5;246m✻[39m [38;5;246mSautéed for 1s · done 10:53[39m
+
+[38;5;246m[48;5;237m❯ [38;5;231m## 実行契約[39m
+  [38;5;231m- 変更してよいのは次のパスのみ: scripts/agent-health/product/lib.sh, scripts/agent-health/product/deadline-guard.sh, docs/design/supervisor-lock-machine-lock-4288.md, [39m
+  [38;5;231mtests/unit/scripts/agent-health/supervisor-lock-machine-lock-4288.test.ts, tests/unit/scripts/agent-health/product-supervisor-3312.test.ts, changelog.d/4288.md[39m
+  [38;5;231m- 作業完了後は必ず commit すること（未 commit の作業は未完了とみなされる）[39m
+  [38;5;231m- 完了条件: 次の検証コマンドがすべて成功すること: work-evidence（commit が存在すること。未 commit の変更は作業証跡として数えない） / scope（変更ファイルが scope.allow の内側に収まっていること） / [39m
+  [38;5;231menv-clean（タスク開始時に在ったポート・tmux セッション・$HOME / ~/.commandmate 直下のエントリが、増えても減っても不合格） / npm run lint / node scripts/run-lint-sh-if-changed.mjs --base [39m
+  [38;5;231morigin/develop / npx tsc --noEmit / node scripts/run-related-unit-tests.mjs --base origin/develop[39m
+
+  [38;5;231m## タスク[39m
+  [38;5;231mhttps://github.com/Kewton/CommandMate/issues/4288 を実装する（不具合修正）。[39m
+  [38;5;231mスラッシュコマンドは使わず、このメッセージの手順どおりに直接実装すること。[39m
+  [38;5;231m確認や質問は求めず、最後まで自分で進めること。[39m
+
+  [38;5;231m## この契約での決定（Issue の「決めること」への答え。これに従う）[39m
+  [38;5;231m- 【詳細（最初に全部読む。契約と同じ重み）】workspace/orchestration/runs/2026-11-23/s11/brief-4288-pr1c-s11.md（MyCodeBranchDesk の checkout、../MyCodeBranchDesk/ から）。そこが指す S9・S10 [39m
+  [38;5;231mの依頼、rescope §2・§4、PM の処分も読む。受入は AC-1〜AC-9[39m
+  [38;5;231m- 【不変条件】旧ブランチ 6900d9942 で決まった振る舞いを変えない。6 ファイルだけを書く（verify-run.sh・scripts/lib/machine-lock.sh・machine-lock.ts・machine-lock-sync.mjs は書かない。develop [39m
+  [38;5;231mの部品と合わないなら直さずに WAIT）。既存の試験の期待・ガード・EXEMPTIONS を変えない。PR1d と deadline-guard.sh:55 は入れない。直す前の赤（AC-2）を記録する[39m
+  [38;5;231m- 【守ること】scope の外は書く前に WAIT。迂回・ゲートのための前提の変更は STOP。push・PR・force push しない。verify・unit-related・npm run test:unit は流さない。本物の Schedule・本番 [39m
+  [38;5;231m3000・~/.commandmate のロック・本物の agy・~/.gemini に触れない。send-*・submit-verified-sender*・cli-tools に触れない。primary checkout で dev・build・e2e をしない[39m
+  [38;5;231m- 【返し】AC ごとの表と lint・lint:sh・tsc・AC-1・AC-6 の vitest の exit。手番の最後の行は `DONE: #4288 <sha> verify exit -` か `WAIT: <理由>` か `STOP: <理由>`[39m
+
+  [38;5;231m## Issue 本文[39m
+  [38;5;231m## #4288 PR1c（書き直し後。#4288 の残りは PR1c だけ）[39m
+  [38;5;231m受入条件 AC-1〜AC-9 は workspace/orchestration/runs/2026-11-23/s11/enabler-return-4288-rescope.md §4 の表（brief-4288-pr1c-s11.md に要約）。supervisor.lock を machine-lock に載せる旧ブランチ [39m
+  [38;5;231m6900d9942 の 6 ファイルを develop の上に当てる。[39m
+
+  [38;5;231m## 実装の進め方[39m
+  [38;5;231m1. まず対象のコードを読み、上の説明が実コードと合っているか確かめる（行番号は古いことがある。名前で探す）。[39m
+  [38;5;231m   食い違っていたら実コードを正とし、判断をコミットメッセージ本文に書く。[39m
+  [38;5;231m2. 先に失敗するテストを書き、それから直す。陽性対照（直す前の実装で落ちる）と陰性対照（今までどおりの動きは変わらない）を置く。[39m
+  [38;5;231m   対照は実リポジトリのファイルを書き換えずに示す（`os.tmpdir()` 配下に `fs.mkdtempSync` で作り、`afterEach` で必ず削除する）。[39m
+  [38;5;231m3. **対になる場所を自分で探す。** 同じ処理の写し（PC [39m
+  [38;5;231mとスマホ、チャット面とターミナル、ルートどうし、ツールごとの実装、同じ関数を別の関数越しに呼ぶ経路）、型の写し（`src/cli/types/`）、説明（`docs/` の ja と [39m
+  [38;5;231men、コメント）、古い動きを固定しているテスト。直した理由が、同じ場所の別の条件にも当てはまらないかも見る。scope の中なら一緒に直す。scope の外なら直さず、コミットメッセージ本文に「本文に無い指摘: [39m
+  [38;5;231m<file>:<line> <内容>」と書く。探した結果は、見つからなかったときも「探した対象と、無かったこと」を本文に書く。文面・エラーを変えたら、`git grep -l '<変える前の文面>' -- tests/integration tests/e2e`[39m
+  [38;5;231mで固定しているテストも探す（docs/orchestrate/contract.md#2-4-文面を変える契約と-integration）。[39m
+  [38;5;231m4. 確認に使うコマンドは `npx vitest run <関係するテスト> tests/unit/guards tests/unit/docs`、`npm run lint`、`npx tsc --noEmit` だけにする（**ガードのテスト `tests/unit/guards` は必ず含める**）。[39m
+  [38;5;231m   テスト全体（`npm run test:unit`）は実行しないこと。全体は検証ゲートか CI が実行する。[39m
+  [38;5;231m   `npx vitest run tests/unit` と `node scripts/run-related-unit-tests.mjs` も同じ扱い（同じマシンでほかの検証が動いていて、負荷で互いに落ちる）。[39m
+  [38;5;231m5. コマンドはすべてフォアグラウンドで実行し、終わるまで待ってから次へ進む。[39m
+
+  [38;5;231m## 作業ルール（厳守）[39m
+  [38;5;231m- 変更してよいのは scope.allow の範囲（scripts/agent-health/product/lib.sh, scripts/agent-health/product/deadline-guard.sh, docs/design/supervisor-lock-machine-lock-4288.md, [39m
+  [38;5;231mtests/unit/scripts/agent-health/supervisor-lock-machine-lock-4288.test.ts, tests/unit/scripts/agent-health/product-supervisor-3312.test.ts, changelog.d/4288.md）と、下の 2 [39m
+  [38;5;231mつの断片ファイル（`changelog.d/4288.md` と `dev-reports/module-reference/issue-4288.md`）だけ。[39m
+  [38;5;231m- 見つけた別の不具合や重複は直さない。「本文に無い指摘」として報告する。[39m
+  [38;5;231m- tmux セッション、サーバー、バックグラウンドプロセスを起動しない。`$HOME` 配下にファイルを作らない（一時ファイルは `os.tmpdir()` 配下のみ）。[39m
+  [38;5;231m- worktree の外（`$HOME`、`/tmp` など）に既にあるファイルやディレクトリは、確認のためでも消したり書き換えたりしない。本番（ポート 3000）に何も送らない。[39m
+  [38;5;231m  確認は `os.tmpdir()` 配下に作った一時ディレクトリ（private HOME など）の中で行う。[39m
+  [38;5;231m- 既存の `it(...)` / `describe(...)` を消したり名前を変えたりしない（上の「決定」が許したものを除く）。既存のテストの期待値も含め、変更が要ると判断したら、変えずに本文に無い指摘として報告する。[39m
+  [38;5;231m- **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。[39m
+  [38;5;231m  代わりに次の 2 ファイルを書いてください。`changelog.d/4288.md` は**実装と同じコミットに含めます**。[39m
+  [38;5;231m  `dev-reports/module-reference/issue-4288.md` は `dev-reports/` 配下なので commit には入りません。[39m
+  [38;5;231m  - `changelog.d/4288.md` — リリース時に `CHANGELOG.md` へ移される **1 エントリ**[39m
+  [38;5;231m    （2 行目。先頭は `- **<type>(<scope>): …** (#4288): …`）。どの節[39m
+  [38;5;231m    （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。[39m
+  [38;5;231m    書き終えたら `node scripts/changelog-fragments.mjs check` を実行し、exit 0 であることを確かめる。[39m
+  [38;5;231m    **形式は次の実例に合わせてください**（develop の `CHANGELOG.md` にある実エントリを丸ごと 1 本。[39m
+  [38;5;231m    エントリは**ファイル中では 1 行**で、下で折り返して見えるのは表示上の都合です）:[39m
+
+  [38;5;231m    ```markdown[39m
+  [38;5;231m    <!-- ### Fixed -->[39m
+  [38;5;231m    - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` [39m
+  [38;5;231mを完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` [39m
+  [38;5;231m直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer [39m
+  [38;5;231mをそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。ゲートは `GET [39m
+  [38;5;231m/api/worktrees/:id/messages?limit=1&unit=pairs` を `--instance`（無指定ならサーバが解決した `cliToolId`）でスコープして読む。**hook を出さないツールは挙動不変** — [39m
+  [38;5;231m`structuredEvents.source.capabilities.supportedEvents`（#1924 の宣言値）が `stop` とターン開始語の両方を宣言しているソースだけがこのゲートに入り、legacy-relay（`supportedEvents: []`）と #1924 [39m
+  [38;5;231m以前のサーバは従来経路のまま台帳も引かない。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り（hooks は全経路 fail-open なので `Stop` の取りこぼしで `wait` が返らなくなってはいけない）、`--timeout` /[39m
+  [38;5;231m`--stall-timeout` はそれより短ければ従来どおり優先される。完了行の `basis=` は、エージェントが最新プロンプトの終了を報告していれば `hook_stop` になる（`scraper_ready` [39m
+  [38;5;231mは「画面しか言っていない」という文書どおりの意味に戻る）。[39m
+  [38;5;231m    ```[39m
+
+  [38;5;231m    - `- **` で始めること — 集計は `changelog-fragments.mjs check` と `grep -cE '^- \*\*'` なので、外れると `check` が不合格にし、エントリとしても数えられません。[39m
+  [38;5;231m    - `(#4288)` は要約の**外**（`**` を閉じた後）に置き、`4288` をファイル名と揃えること — `（Issue #4288）` を要約の中に埋めると `check` が不合格にします。[39m
+  [38;5;231m    - `<type>` は CLAUDE.md のコミットメッセージ規約と同じ語彙（`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `ci` / `style`）— 断片の検証（上の [39m
+  [38;5;231mcheck）はこれ以外を不合格にし、リリースノート作成時の分類にも使います。[39m
+  [38;5;231m    - 1 エントリ＝1 行（折らない）— `CHANGELOG.md` は 1 エントリ 1 行で運用しており、`check` も 3 行目以降に空行以外があると不合格にします。本文がどれだけ長くても改行を入れません。[39m
+  [38;5;231m  - `dev-reports/module-reference/issue-4288.md` — `docs/module-reference.md` の表に足す注記を[39m
+  [38;5;231m    **行キー（`| \`path\` |`）ごと**に列挙する。既存行への追記なら「どの行に何を足すか」を書く。[39m
+  [38;5;231m    **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力[39m
+  [38;5;231m    （行番号つきの行キー）を断片に書き写してから**書くこと。0 件だった行への追記を指示しない[39m
+  [38;5;231m    （新しい行を足すなら「新規行」と明記する）。**ファイルの行が 0 件なら、親ディレクトリの行[39m
+  [38;5;231m    （`grep -n '^| \`<dir>/\`' docs/module-reference.md`。例 `src/lib/agent-health/`）も探し、あればそこに足す。**[39m
+  [38;5;231m    足すものが無ければ「追記なし」の 1 行でよい。実例:[39m
+
+  [38;5;231m    ```markdown[39m
+  [38;5;231m    ## 既存行への追記[39m
+  [38;5;231m    - `src/lib/session/worktree-status-helper.ts` — 実在確認: `docs/module-reference.md:103`（行番号は確認時点のもの）[39m
+  [38;5;231m      追記内容: 「private `getStatusCaptureLines()` を削除し `resolveCaptureSpec(cliToolId).statusLines` に置換（Issue #1933）」[39m
+
+  [38;5;231m    ## 新規行[39m
+  [38;5;231m    追記なし[39m
+  [38;5;231m    ```[39m
+  [38;5;231m- 断片が無いとリリースノートと module-reference に載らない。**実装と同じ commit の時点で書くこと。**[39m
+  [38;5;231m- この Issue の断片は、1 行目を `<!-- ### Fixed -->` にする。[39m
+  [38;5;231m- コミットは 1 つにまとめる。メッセージは `fix(agent-health): <要約> (#4288)`。本文に、決めたこと・確かめたこと・本文に無い指摘を書く。[39m
+  [38;5;231m  `.commandmate/tasks/` と `dev-reports/` はコミットに含めない。`changelog.d/4288.md` は実装と同じコミットに含める。[39m
+  [38;5;231m- push と PR 作成はしない（オーケストレーターが行う）。[39m
+  [38;5;231m- すべて終わったら、最後に `IMPL_COMPLETED` とだけ出力する。[39m
+
+[49m  [38;5;246mRead [1m2[0m[38;5;246m files, listed [1m1[0m[38;5;246m directory, called [1m3[0m[38;5;246m tools, ran [1m28[0m[38;5;246m shell commands [39m
+
+[38;5;231m⏺[39m PR1c は develop（19ef66dd6）の上に 1 コミット [38;5;153m60082d48f[39m で入れました。push・PR・verify はしていません。
+
+  旧ブランチの 6900d9942 から 5 ファイルを取り出し、[38;5;153mchangelog.d/4288.md[39m だけを PR1c の 1 行で新しく書きました。5 ファイルとも [38;5;153mgit diff 6900d9942[39m は 0 行で、develop との差は旧 4
+  コミットの差を足したものと同じでした（+/- 行のハッシュで照合）。lib.sh が呼ぶ develop の bash
+  の部品（[38;5;153mlock_acquire_path[39m・[38;5;153mlock_release_held[39m・[38;5;153mlock_recover_only[39m・[38;5;153mlock_recover[39m・[38;5;153mmachine_lock_pid_identity[39m）はすべて揃っていて、試験と合わない所はなかったので WAIT は要りませんでした。
+
+  ┌──────┬───────────────────────────────────────────────────────────────────────────────────────────────────────────────┬──────────────────────────────────────────────────────────────────────────┐
+  │  AC  │                                                  判定の仕方                                                   │                                   結果                                   │
+  ├──────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ AC-1 │ PR1c の試験 2 ファイルの vitest                                                                               │ [1mexit 0[0m（530 passed、1 回、揺れなし）                                     │
+  ├──────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ AC-2 │ 同じ試験を develop の直す前の lib.sh・deadline-guard.sh に当てる                                              │ 530 本中 281 本が赤（内訳は下）。「2 者が持つ」赤は 7 本                 │
+  ├──────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ AC-3 │ 3312 の 8 者の取り合い                                                                                        │ 緑。差分は [38;5;153mgit diff fd2f4a589 6900d9942[39m と一致                           │
+  ├──────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ AC-4 │ [38;5;153mguard-head[39m 列                                                                                                 │ 緑                                                                       │
+  ├──────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ AC-5 │ [38;5;153mrelease-unheld[39m 行                                                                                             │ 緑                                                                       │
+  ├──────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ AC-6 │ [38;5;153mgit diff origin/develop -- tests/[39m と                                                                          │ 差分は 3312 の試験と新しい試験の 2 ファイルだけ。vitest は [1mexit 0[0m（243   │
+  │      │ vitest（agent-health・lib/agent-health・guards・verification・docs、[38;5;153m--maxWorkers=4[39m）                          │ files、8224 passed）                                                     │
+  ├──────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ AC-7 │ [38;5;153mnpm run lint:sh[39m、試験は [38;5;153m/bin/bash[39m                                                                             │ exit 0                                                                   │
+  ├──────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ AC-8 │ [38;5;153mgit diff --name-only origin/develop[39m                                                                           │ 6 ファイルだけ                                                           │
+  ├──────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ AC-9 │ verify                                                                                                        │ 流していない（リーダーが順番表で 1 回）                                  │
+  └──────┴───────────────────────────────────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────────────────────────────────────────────────┘
+
+  ほかのコマンドの exit:
+  - [38;5;153mnpm run lint[39m は 0。warning が 1 件ありますが、範囲外の [38;5;153mSessionHandoffDialog.tsx[39m の既存のものです。
+  - [38;5;153mnpx tsc --noEmit[39m は 0。
+  - [38;5;153mrun-lint-sh-if-changed[39m は 0。
+  - [38;5;153mchangelog-fragments check[39m は 0。
+
+  [1mAC-2 の赤の内訳[0m
+  - [1m関数・変数が無いから赤：281 本すべて。[0m
+    - 257 本：[38;5;153mPRODUCT_LOCK_RESULT[39m が未定義。
+    - 23 本：拒否の exit 2・loader・細目。
+    - 1 本（3312）：[38;5;153mpause:recover-only-judged[39m の口が無く timeout。
+  - [1m生きた保有者を退かす／2 者が持つ：7 本。[0m 結果・文面・札の比較だけを外した試験の写しを [38;5;153mos.tmpdir()[39m 下で流しました（写しはコミットしていません）。直す前の実装は "took over a stale lock"
+    を出して、生きた記録を自分の owner に置き換えました。
+    - acquire-head の absent×alive・stale-old×alive・corrupt×alive・other-plain×alive・other-host×alive・aside×alive・other-eperm×unknown（pid 1）。
+    - この写しで落ちた残り 55 本は、札を無視して取る（acquire-behind 25）・記録に [38;5;153mstarted_at=[39m/[38;5;153mv=1[39m が無い（8）・ガードの関数が無い、などでした。
+
+  [1m旧ブランチの試験の結果との違い：[0m 無し。develop の上でも全部緑でした。
+
+  [1m本文に無い指摘：[0m [38;5;153mdocs/design/lock-reservation-rest-4288.md:109[39m が、直す前の [38;5;153mproduct_lock_take_stale[39m の呼び出しをいまのこととして書いています。範囲外なので直していません。
+
+  [1m探した対になる場所：[0m
+  - 消した 3 関数の呼び手：残りは無し。[38;5;153msupervisor.sh:78/82[39m は呼び方が同じなので変更は要りません。
+  - 消した文面を固定する integration・e2e の試験：0 件。
+  - [38;5;153m.agents[39m 側の写し：無し。
+
+  module-reference の断片は [38;5;153mdev-reports/module-reference/issue-4288.md[39m に書きました（[38;5;153mscripts/agent-health/[39m の行 364 への追記。ignore されているのでコミットには入っていません）。
+
+  DONE: #4288 60082d48f verify exit -
+
+  IMPL_COMPLETED
+
+[38;5;246m✻[39m [38;5;246mBaked for 17m 4s · done 11:10 · 13 messages hidden (/focus to show)[39m
+
+[38;5;246m[48;5;237m❯ [38;5;231mリーダーから再指示 1 です。../MyCodeBranchDesk/workspace/orchestration/runs/2026-11-23/s11/lead-to-worker-4288-pr1c-r1.md を全部読み、そのとおりに進めてください（AC-2 の証拠を再現できる形で [39m
+  [38;5;231mworkspace/ac2-4288/ に残す。コードとコミットは変えない）。最後の行は DONE:/WAIT:/STOP:[39m
+
+[38;5;246m[49m [39m Running mkdir -p workspace/ac2-4288 && cd workspace/ac2-4…
+[38;5;246m  ⎿  $ mkdir -p workspace/ac2-4288 && cd workspace/ac2-4288 && T=tests/unit/scripts/agent-health/supervisor-lock-machine-lock-4288.test.ts; rm -rf a b; mkdir -p a/$(dirname $T) b/$(dirname $T); git -C
+[39m     [38;5;246m../.. show 60082d48f:$T > a/$T; node -e '[39m
+     [38;5;246mconst fs=require("fs");let s=fs.readFileSync(process.argv[1],…[39m
+
+[38;5;174m✽[39m [38;5;174mMisting… [38;5;246m(1m 10s · ↓[39m [38;5;246m5.7k tokens)[39m
+[38;5;246m  ⎿  Tip: Use /btw to ask a side question without interrupting Claude[39m
+
+[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[38;5;246m❯ [39m
+[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m  [38;5;220m⏵⏵ auto mode on[38;5;246m (shift+tab to cycle) · esc to interrupt[39m

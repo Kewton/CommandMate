@@ -25,6 +25,7 @@ import * as lockSync from '../../../scripts/orchestrate/machine-lock-sync.mjs';
 import { acquireMachineLock } from '@/lib/verification/machine-lock';
 import { HOST, REPO, deadPid, killStarted, liveGroup, mutatedSync, removeRoot } from './lock-4288-harness';
 import { guardTmpDirCount } from './tmp-leak-guard-4288';
+import { loadLegacy } from './lock-generation-4559-harness';
 
 // Every temp directory this file makes is removed (counted before and after: pr1af-impl-9).
 guardTmpDirCount(["lock-pr1a-fixes-4288-"]);
@@ -75,7 +76,11 @@ describe('1. the sync JS\'s release after a handOff: a record whose recorded pid
    * A's release — after it read the owner, before the delete — B, the head, recovers the dead record
    * and takes the lock.
    */
-  function race(mod: typeof lockSync) {
+  // #4559 PR-2 (#4559 comment 7183455133, reason (a)): with the generation chain a successor of the new version
+  // cannot take while A holds its generation — the order is gone between new versions. B is the develop copy
+  // before #4559 (tests/fixtures/machine-lock-legacy/), which sees only the <lock>: the meaning (a successor that
+  // took between the read and the delete keeps its lock) is the same.
+  function race(mod: typeof lockSync, succ: typeof lockSync) {
     const lock = lockIn();
     const g = deadPid();
     let successor: ReturnType<typeof lockSync.acquireMachineLockSync> | null = null;
@@ -85,7 +90,7 @@ describe('1. the sync JS\'s release after a handOff: a record whose recorded pid
       token: 'T0',
       hooks: {
         groupAlive: () => {
-          successor ??= lockSync.acquireMachineLockSync('x', { lockPath: lock, timeoutMs: 0, token: 'SUCC' });
+          successor ??= succ.acquireMachineLockSync('x', { lockPath: lock, timeoutMs: 0, token: 'SUCC' });
           return false;
         },
       },
@@ -96,8 +101,8 @@ describe('1. the sync JS\'s release after a handOff: a record whose recorded pid
     return { lock, g, result, successor: successor as ReturnType<typeof lockSync.acquireMachineLockSync> | null };
   }
 
-  it('the successor B took between the read and the delete keeps its lock: needs-head, and the head release keeps B\'s', () => {
-    const { lock, g, result, successor } = race(lockSync);
+  it('the successor B took between the read and the delete keeps its lock: needs-head, and the head release keeps B\'s', async () => {
+    const { lock, g, result, successor } = race(lockSync, await loadLegacy(root));
     expect(successor?.acquired).toBe(true);
     expect(result).toBe('needs-head');
     expect(ownerToken(lock)).toBe('SUCC');
@@ -110,7 +115,7 @@ describe('1. the sync JS\'s release after a handOff: a record whose recorded pid
 
   it('positive control: the release that judged the group alone (PR1a) removes the successor\'s lock', async () => {
     const legacy = await mutatedSync(root, (s) => s.replace('if (mine && current.owner.pid !== process.pid) {', 'if (false) {'));
-    const { lock, result, successor } = race(legacy);
+    const { lock, result, successor } = race(legacy, await loadLegacy(root));
     expect(successor?.acquired).toBe(true);
     expect(result).toBe('released');
     expect(fs.existsSync(lock), 'B\'s lock was removed under it').toBe(false);
@@ -209,22 +214,26 @@ describe('2. machine-lock.ts creates the owner exclusively', () => {
   });
 
   it('positive control: a copy that opens with \'w\' overwrites the successor\'s owner and calls it taken', async () => {
-    const source = fs.readFileSync(path.join(REPO, 'src/lib/verification/machine-lock.ts'), 'utf8');
+    // #4559 PR-2 (案 F, the rule of the (d) rows): machine-lock.ts has no publish of its own any more — it
+    // runs the core's byte copy, which is what is mutated here (the assertions are the same).
+    const source = fs.readFileSync(path.join(REPO, 'src/lib/verification/machine-lock-sync-core.generated.ts'), 'utf8');
     // #4288 PR1a-f (design §5.1): the exclusion is the publish's link(2) — the mutation turns it into a
     // rename (which replaces the owner there); the expectation (written over and called taken) is the same.
-    const out = source
-      .replace('() => linkSync(from, to)', '() => renameSync(from, to)')
-      .replace("from '@/lib/logger'", `from '${path.join(REPO, 'src/lib/logger')}'`);
-    expect(out).not.toContain('() => linkSync(from, to)');
-    const file = path.join(root, `machine-lock-mutated-${Math.random().toString(36).slice(2)}.ts`);
+    const out = source.replace('() => fs.linkSync(from, to)', '() => fs.renameSync(from, to)');
+    // #4559 (the human's answer, #4559 comment 7180525760): the text the mutation replaces is there once
+    // before and not after — the mutation cannot pass by changing nothing.
+    expect(source.split('() => fs.linkSync(from, to)').length - 1).toBe(1);
+    expect(out.split('() => fs.linkSync(from, to)').length - 1).toBe(0);
+    expect(out).not.toContain('() => fs.linkSync(from, to)');
+    const file = path.join(root, `machine-lock-mutated-${Math.random().toString(36).slice(2)}.mjs`);
     fs.writeFileSync(file, out);
-    const legacy = (await import(/* @vite-ignore */ pathToFileURL(file).href)) as typeof import('@/lib/verification/machine-lock');
+    const legacy = (await import(/* @vite-ignore */ pathToFileURL(file).href)) as typeof lockSync;
     const lockRoot = path.join(root, 'legacy');
     fs.mkdirSync(lockRoot);
-    const r = await legacy.acquireMachineLock('x', { root: lockRoot, timeoutMs: 0, __testHooks: { fault: putSuccessor } });
+    const r = legacy.acquireMachineLockSync('x', { root: lockRoot, timeoutMs: 0, hooks: { fault: putSuccessor } });
     expect(r.acquired).toBe(true);
     expect(ownerToken(path.join(lockRoot, 'x.lock'))).not.toBe('succ');
-    if (r.acquired) r.handle.release();
+    if (r.acquired) r.release();
   });
 });
 

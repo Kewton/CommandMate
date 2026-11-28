@@ -52,6 +52,7 @@ import { getVerifiableTask } from '@/lib/db/tasks-db';
 import { VerificationRunNotFoundError } from '@/lib/db/verification-db';
 import { resolveDefaultBranchName } from '@/lib/git/git-default-branch';
 import { createLogger } from '@/lib/logger';
+import { UAT_DEDICATED_USER_ENV_VAR, UAT_ISOLATION_ENV_VAR } from '@/config/uat-isolation';
 // Issue #2000: deep path, not the `@/lib/push` barrel — several suites replace
 // that barrel with a stub declaring only `notifyPushSubscribers`, and a call
 // reached through it would be `undefined` in exactly those tests.
@@ -903,6 +904,14 @@ class TailBuffer {
  * the gate match CI. A command that needs one says so itself, as this
  * repository's scripts already do (`NODE_ENV=test vitest run`,
  * `NODE_ENV=production next build`).
+ *
+ * Issue #4573: `CM_UAT_ISOLATION` and `CM_UAT_DEDICATED_USER` are dropped for
+ * the same reason. They are the switch of a UAT server (`src/config/uat-isolation.ts`),
+ * and CI never sets them. A gate run from a UAT server inherited them, so the
+ * suite under test ran every test in isolation mode (the CLI refusing port
+ * 3000 without `CM_PORT`, launches refused without shared hooks) and the gate
+ * went red on the host, not on the diff. Only the switch is dropped: `CM_PORT`
+ * and the rest of the inherited environment still reach the gate.
  */
 function gateProcessEnv(gateEnv: Record<string, string>): NodeJS.ProcessEnv {
   const env: Record<string, string | undefined> = { ...process.env, CI: 'true', ...gateEnv };
@@ -910,6 +919,11 @@ function gateProcessEnv(gateEnv: Record<string, string>): NodeJS.ProcessEnv {
   // still reach the child as an empty string, and `NODE_ENV=` is not the same
   // thing as "unset".
   delete env.NODE_ENV;
+  // Issue #4573: the UAT isolation switch is the server's, not CI's. A gate
+  // inheriting `CM_UAT_ISOLATION` / `CM_UAT_DEDICATED_USER` runs the suite in a
+  // mode CI never runs it in.
+  delete env[UAT_ISOLATION_ENV_VAR];
+  delete env[UAT_DEDICATED_USER_ENV_VAR];
   // `next/types/global.d.ts` augments NodeJS.ProcessEnv with a *required*
   // readonly NODE_ENV, so the absence this function exists to produce cannot be
   // expressed in that type. The runtime contract `spawn` uses is a plain string

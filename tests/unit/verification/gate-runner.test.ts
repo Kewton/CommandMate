@@ -332,6 +332,65 @@ options:
     }
   });
 
+  describe('the UAT isolation switch stays with the server (Issue #4573)', () => {
+    // A UAT server runs under `CM_UAT_ISOLATION=1` (or `own-home` with
+    // `CM_UAT_DEDICATED_USER`). The switch belongs to that server, not to the
+    // CI check a gate re-runs: inherited, it turns the suite's own isolation
+    // tests (refuse 3000, refuse a launch without hooks) on for every test, and
+    // the gate goes red on the host rather than on the diff. CI never sets it.
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it('does not hand CM_UAT_ISOLATION / CM_UAT_DEDICATED_USER to gate commands', async () => {
+      vi.stubEnv('CM_UAT_ISOLATION', 'own-home');
+      vi.stubEnv('CM_UAT_DEDICATED_USER', 'cm-uat-4573');
+      const repo = createRepo(`
+version: 1
+gates:
+  - id: uat-env-probe
+    command: "sh -c 'echo UAT_ISO_SEEN=[\${CM_UAT_ISOLATION-unset}] UAT_USER_SEEN=[\${CM_UAT_DEDICATED_USER-unset}]'"
+    timeoutSec: 30
+options:
+  baseRef: main
+`);
+      addUncommittedWork(repo);
+      registerWorktree('wt-uat-env', repo);
+
+      const runId = await runToCompletion('wt-uat-env', repo);
+      const logTail = gatesById(runId).get('uat-env-probe')?.logTail ?? '';
+      expect(logTail).toContain('UAT_ISO_SEEN=[unset]');
+      expect(logTail).toContain('UAT_USER_SEEN=[unset]');
+      expect(logTail).not.toContain('own-home');
+      expect(logTail).not.toContain('cm-uat-4573');
+    });
+
+    it('still hands CI=true, the gate env and unrelated variables to gate commands', async () => {
+      // The negative control: only the switch is dropped, not every `CM_*`.
+      vi.stubEnv('CM_UAT_ISOLATION', '1');
+      vi.stubEnv('CM_PORT', '45730');
+      vi.stubEnv('GATE_PROBE_4573', 'kept');
+      const repo = createRepo(`
+version: 1
+gates:
+  - id: kept-env-probe
+    command: "sh -c 'echo CI_SEEN=[\${CI-unset}] WT_SEEN=[\${CM_WORKTREE_ID-unset}] PORT_SEEN=[\${CM_PORT-unset}] PROBE_SEEN=[\${GATE_PROBE_4573-unset}]'"
+    timeoutSec: 30
+options:
+  baseRef: main
+`);
+      addUncommittedWork(repo);
+      registerWorktree('wt-kept-env', repo);
+
+      const runId = await runToCompletion('wt-kept-env', repo);
+      const logTail = gatesById(runId).get('kept-env-probe')?.logTail ?? '';
+      expect(logTail).toContain('CI_SEEN=[true]');
+      expect(logTail).toContain('WT_SEEN=[wt-kept-env]');
+      expect(logTail).toContain('PORT_SEEN=[45730]');
+      expect(logTail).toContain('PROBE_SEEN=[kept]');
+    });
+  });
+
   it('keeps only the tail of the output, bounded by maxLogTailBytes', async () => {
     // Three writes of very different sizes, the middle one far larger than the
     // window. The retained tail therefore has to straddle a write boundary,

@@ -39,4 +39,5 @@
 - コミットは 1 つにまとめる。メッセージは `{{COMMIT_PREFIX}}: <要約> (#{{ISSUE}})`。本文に、決めたこと・確かめたこと・本文に無い指摘を書く。
   `.commandmate/tasks/` と `dev-reports/` はコミットに含めない。`changelog.d/{{ISSUE}}.md` は実装と同じコミットに含める。
 - push と PR 作成はしない（オーケストレーターが行う）。
+- 下の締めの行の `verify exit <n>` の `<n>` は、自己確認（上の確認のコマンド: lint・lint:sh・tsc・vitest）の exit を数字で書く: 全部 0 なら `0`、どれか落ちたら `1`。`-` など数字でないものは使わない（待つ側は数字でない DONE の行を返しの行と読まない）。
 - 手番の最後の行は `DONE: #{{ISSUE}} <sha> verify exit <n>`・`WAIT: <理由>`・`STOP: <理由>` のどれかにする（`IMPL_COMPLETED` だけの行は終わりの形にしない。待つ側は `IMPL_COMPLETED` を「形の外の終わり方」として検出して知らせる）。

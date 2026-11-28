@@ -1,0 +1,7 @@
+{
+  "sha": "690caa46a29ee546c9cd0968041500a24287851e",
+  "files": {
+    "machine-lock-sync.mjs.txt": { "source": "scripts/orchestrate/machine-lock-sync.mjs", "sha256": "1557be494734026dd8d42fb0e8e26833479517dfaf2a05ddc2612feeb186566d" },
+    "machine-lock.ts.txt": { "source": "src/lib/verification/machine-lock.ts", "sha256": "3f23aa15569a40794c1b85bdcc783474223772fac95cb6a6e92cd7f79798d1df" }
+  }
+}
