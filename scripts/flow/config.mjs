@@ -13,6 +13,12 @@
  * `relayWatch` (Issue #4418, docs/design/flow-relay-watch-4418.md §2) is read by `tick`: the PM's
  * session, the sessions only the PM sends to, the server URL (localhost only) and the two
  * thresholds, and whether check 1 is told (`notifyNoRelay`, off until #4420). Without the section `tick` reads and writes exactly what it did before.
+ *
+ * `milestone` (Issue #4642 PR-1, docs/design/milestone-check-4642.md §4) is read by
+ * scripts/orchestrate/milestone-check.mjs: the current Sprint's name (`current`, required — the
+ * check never infers it), the roadmap Issue whose last comment records moves (`roadmapIssue`,
+ * optional) and how many days of merged PRs count as "just merged" (`mergedWindowDays`, optional,
+ * default 14). Any other key under `milestone` is refused.
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -23,7 +29,7 @@ export const CONFIG_FILE = path.join('.commandmate', 'flow.yaml');
 export const CONFIG_MAX_BYTES = 64 * 1024;
 export const EXCLUDE_MAX = 64;
 export const GIT_CAP_MS = 10_000;
-export const ALLOWED_KEYS = ['version', 'repo', 'base', 'exclude', 'tz', 'wip', 'relayWatch'];
+export const ALLOWED_KEYS = ['version', 'repo', 'base', 'exclude', 'tz', 'wip', 'relayWatch', 'milestone'];
 /** Keys that exist in the design but not in PR1a: refused, with who adds them. */
 export const LATER_KEYS = {
   alerts: 'a later PR of #4367 (PR-A)',
@@ -35,6 +41,8 @@ const ALWAYS_EXCLUDED = ['main', 'master'];
 /** The limit section (#4368 PR1). Not exported: no module of scripts/flow/ exports a WIP reader (cli-4367). */
 const LIMIT_TOTAL_MAX = 1000;
 const LIMIT_LATER_KEYS = { active: 'PR2a of #4368 adds it' };
+/** The merged-PR window of the milestone section (#4642 PR-1): 1..365 days, default 14. */
+const MILESTONE_WINDOW_MAX = 365;
 const BRANCH = /^[A-Za-z0-9._/-]+$/;
 /** The relay watch section (#4418). The id patterns mirror the CLI's (`src/cli/utils/api-client.ts`). */
 const WATCH_KEYS = ['url', 'pm', 'receivers', 'pendingMinutes', 'screenMinutes', 'notifyNoRelay'];
@@ -158,6 +166,10 @@ export function readSettingsFile(repoRoot, options = {}) {
     const problem = watchSectionProblem(doc.relayWatch);
     if (problem) return { error: `${CONFIG_FILE}: ${problem}` };
   }
+  if ('milestone' in doc) {
+    const problem = milestoneSectionProblem(doc.milestone);
+    if (problem) return { error: `${CONFIG_FILE}: ${problem}` };
+  }
   return { settings: doc };
 }
 
@@ -179,6 +191,33 @@ function limitSectionProblem(section) {
   const total = /** @type {{ total?: unknown }} */ (section).total;
   if (!Number.isInteger(total) || /** @type {number} */ (total) < 1 || /** @type {number} */ (total) > LIMIT_TOTAL_MAX) {
     return `wip.total must be an integer from 1 to ${LIMIT_TOTAL_MAX}`;
+  }
+  return null;
+}
+
+/**
+ * What is wrong with the `milestone` section, or null (#4642 PR-1, docs/design/milestone-check-4642.md §4).
+ * `current` is required (the check never infers it, I4); `roadmapIssue` and `mergedWindowDays` are
+ * optional, and no other key is accepted.
+ * @param {unknown} section
+ * @returns {string | null}
+ */
+function milestoneSectionProblem(section) {
+  if (section === null || typeof section !== 'object' || Array.isArray(section)) {
+    return 'milestone must be a mapping like { current: "Sprint 13" } (#4642)';
+  }
+  for (const key of Object.keys(section)) {
+    if (key !== 'current' && key !== 'roadmapIssue' && key !== 'mergedWindowDays') return `unknown key "milestone.${key}"`;
+  }
+  const s = /** @type {Record<string, any>} */ (section);
+  if (typeof s.current !== 'string' || s.current.trim() === '' || /[\r\n]/.test(s.current)) {
+    return 'milestone.current must be the Milestone title (a non-empty single line)';
+  }
+  if ('roadmapIssue' in s && (!Number.isInteger(s.roadmapIssue) || s.roadmapIssue < 1)) {
+    return 'milestone.roadmapIssue must be an Issue number';
+  }
+  if ('mergedWindowDays' in s && (!Number.isInteger(s.mergedWindowDays) || s.mergedWindowDays < 1 || s.mergedWindowDays > MILESTONE_WINDOW_MAX)) {
+    return `milestone.mergedWindowDays must be an integer from 1 to ${MILESTONE_WINDOW_MAX}`;
   }
   return null;
 }
