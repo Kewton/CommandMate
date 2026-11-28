@@ -43,7 +43,7 @@ vi.mock('@/lib/api-client', async (importOriginal) => {
 import { ApiError } from '@/lib/api-client';
 import { useOptimisticPaneMessages } from '@/hooks/useOptimisticPaneMessages';
 import { ToastProvider } from '@/components/common/Toast';
-import { getDraftValueKey, getSplitDraftKey, readRetargetTags } from '@/lib/drafts/message-draft';
+import { getDraftValueKey, getSplitDraftKey, readDraft, readRetargetTags } from '@/lib/drafts/message-draft';
 
 const WT = 'wt-4535';
 const TEXT = 'please look at the diff';
@@ -118,7 +118,7 @@ describe('[#4535 T19〜T21] the fence 409 on the optimistic send', () => {
     expect(toastText()).toContain('送っていません');
     // r7: back into the draft with its tag, not through the plain insert.
     expect(onNotSent).not.toHaveBeenCalled();
-    expect(window.localStorage.getItem(DRAFT_KEY)).toBe(TEXT);
+    expect(readDraft(DRAFT_KEY).text).toBe(TEXT);
     // The row fails (it is not dropped) and a discard does not hand the text back a second time.
     expect(result.current.messages[0].optimisticState).toBe('error');
     let discarded: string | undefined = 'x';
@@ -150,7 +150,8 @@ describe('[#4535 T19〜T21] the fence 409 on the optimistic send', () => {
     await act(async () => answers[1](fence('target-gone', 'not_sent')));
     await flush();
     expect(onNotSent).not.toHaveBeenCalled();
-    expect(window.localStorage.getItem(DRAFT_KEY)).toBeNull();
+    // Issue #4604 S13: no text in the draft's one value.
+    expect(readDraft(DRAFT_KEY).text).toBe('');
     expect(result.current.messages[0].optimisticState).toBe('error');
     // The discard hands it back (it never went back), once — with its tag, not as a bare string.
     let discarded: string | undefined = 'x';
@@ -158,7 +159,7 @@ describe('[#4535 T19〜T21] the fence 409 on the optimistic send', () => {
       discarded = result.current.discard(result.current.pending[0].tempId);
     });
     expect(discarded).toBeUndefined();
-    expect(window.localStorage.getItem(DRAFT_KEY)).toBe(TEXT);
+    expect(readDraft(DRAFT_KEY).text).toBe(TEXT);
     expect(draftTargets()).toEqual([{ instanceId: 'codex-2', cliToolId: 'codex' }]);
     expect(sendMessageMock).toHaveBeenCalledTimes(2);
   });
@@ -294,7 +295,7 @@ describe('[#4535 T19b r5] the discard, a hold that cannot be written, and the ho
     });
     // r7: handed back by the tagged road (into the draft with its tag), not as the discard's string.
     expect(discarded).toBeUndefined();
-    expect(window.localStorage.getItem(DRAFT_KEY)).toBe(TEXT);
+    expect(readDraft(DRAFT_KEY).text).toBe(TEXT);
     expect(draftTargets()).toEqual([{ instanceId: 'codex-2', cliToolId: 'codex' }]);
     expect(window.localStorage.getItem(HOLD_KEY)).toBeNull();
     expect(sendMessageMock).toHaveBeenCalledTimes(2);
@@ -355,7 +356,7 @@ describe('[#4535 T19b r5] the discard, a hold that cannot be written, and the ho
     const { result, onNotSent } = renderPane();
     act(() => result.current.sendOptimistic(TEXT, { cliToolId: 'codex', instanceId: 'codex-2' }));
     await flush();
-    await waitFor(() => expect(window.localStorage.getItem(DRAFT_KEY)).toBe(TEXT));
+    await waitFor(() => expect(readDraft(DRAFT_KEY).text).toBe(TEXT));
     expect(draftTargets()).toEqual([{ instanceId: 'codex-2', cliToolId: 'codex' }]);
     expect(onNotSent).not.toHaveBeenCalled();
     expect(toastText()).not.toContain('本文を入力欄に戻せませんでした');
@@ -378,7 +379,7 @@ describe('[#4535 T19b r5] the discard, a hold that cannot be written, and the ho
       { instanceId: 'codex-2', cliToolId: 'codex' },
       { instanceId: 'codex-3', cliToolId: 'codex' },
     ]);
-    expect(window.localStorage.getItem(DRAFT_KEY)).toBe('ok\n\nok');
+    expect(readDraft(DRAFT_KEY).text).toBe('ok\n\nok');
   });
 
   it('conversation.sendTargetChanged.textNotReturned is in ja and en', () => {

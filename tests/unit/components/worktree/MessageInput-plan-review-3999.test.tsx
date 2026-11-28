@@ -21,6 +21,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, screen, waitFor, act } from '@testing-library/react';
 import { MessageInput } from '@/components/worktree/MessageInput';
+import { readDraft } from '@/lib/drafts/message-draft';
 import {
   mockCommandGroups,
   createDefaultProps,
@@ -107,7 +108,8 @@ describe('[#3999] MessageInput: no send into a plan review', () => {
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(onMessageSent).not.toHaveBeenCalled();
     expect(getTextarea().value).toBe(DRAFT);
-    expect(window.localStorage.getItem(DRAFT_KEY)).toBe(DRAFT);
+    // Issue #4604 S13: the draft is its one value (read with the lib's public read).
+    expect(readDraft(DRAFT_KEY).text).toBe(DRAFT);
     // The notice says why, louder once a send was stopped, with the way out.
     const notice = screen.getByTestId('composer-plan-review-notice');
     expect(notice).toHaveAttribute('role', 'alert');

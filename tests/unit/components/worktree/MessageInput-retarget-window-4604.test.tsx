@@ -29,7 +29,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, screen, act, cleanup } from '@testing-library/react';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import { mockCommandGroups, getTextarea, typeMessage, pressEnter } from '@tests/helpers/message-input-test-utils';
-import { getInstanceDraftKey, getRetargetTagKey, getSplitDraftKey, newRetargetTag, readRetargetUnstorable, returnRetargetedText, writeRetarget } from '@/lib/drafts/message-draft';
+import { getDraftValueKey, getInstanceDraftKey, getRetargetTagKey, getSplitDraftKey, readRetargetStore, newRetargetTag, readRetargetUnstorable, returnRetargetedText, writeRetarget } from '@/lib/drafts/message-draft';
 import { releasePageMarks } from '@tests/helpers/draft-store-fault-4604';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
@@ -134,7 +134,9 @@ function marksOf(key: string): { ids: string[]; seen: string[]; originals: Recor
   const ids: string[] = [];
   const seen: string[] = [];
   const originals: Record<string, Target> = {};
-  const raw = window.localStorage.getItem(getRetargetTagKey(key));
+  // Issue #4604 S13: the marks of the draft's one value, in the shape of before (a list or {unknown, tags}).
+  const read = readRetargetStore(key);
+  const raw = read.kind === 'list' ? JSON.stringify(read.tags) : read.kind === 'unknown' ? JSON.stringify({ unknown: read.generation, tags: read.tags }) : read.kind === 'absent' ? null : '{junk';
   if (raw !== null) {
     try {
       const parsed = JSON.parse(raw) as unknown;
@@ -363,7 +365,8 @@ describe('[#4604] a press between the commit of a To change and its passive effe
       expect(sendMessageMock).not.toHaveBeenCalled();
       expect(screen.queryByTestId('message-input-retarget-confirm')).toBeNull();
       expect(screen.queryByTestId('session-start-brief-dialog')).toBeNull();
-      if (store === 'unknown') expect(window.localStorage.getItem(tagKey)).not.toBeNull();
+      // Issue #4604 S13: the marks are in the draft's one value — still "unknown".
+      if (store === 'unknown') expect(readRetargetStore(shape.key).kind).toBe('unknown');
       if (store === 'unstorable') expect(readRetargetUnstorable(shape.key)).not.toBeNull();
       return;
     }
@@ -460,7 +463,8 @@ describe('[#4604 r3] a mark born after the question is not covered by its yes (I
     act(() => clickYes(screen.getByTestId('message-input-retarget-confirm-yes')));
     await screen.findByTestId('session-start-brief-decline');
     fetchStartPreviewMock.mockResolvedValue(NOT_SHOWN);
-    window.localStorage.setItem(getRetargetTagKey(KEY), JSON.stringify({ unknown: 'g2', tags: [] }));
+    // Issue #4604 S13: another tab writes the draft's one value with a new generation.
+    window.localStorage.setItem(getDraftValueKey(KEY), JSON.stringify({ v: 1, text: TEXT, tags: [], unknown: 'g2', sendMark: null }));
     act(() => screen.getByTestId('session-start-brief-decline').click());
     await settle(50);
     expectPostsHoldTheInvariant();

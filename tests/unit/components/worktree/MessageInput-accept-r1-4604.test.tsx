@@ -39,7 +39,6 @@ import {
   installStoreFaults,
   isDraftValueKey,
   otherTabReleases,
-  otherTabWrites,
   otherTabWritesDraft,
   rawStore,
   releasePageMarks,
@@ -146,14 +145,15 @@ describe('[#4604 accept r1 T-F1] another tab sent the draft after a yes: this ta
     await settle();
     expect(ta('b').value).toBe(TEXT);
     // Tab A: its send to X was stopped by the fence — its mark goes into the store (B hears the event).
-    otherTabWrites(TAG_KEY, aMarks);
+    // Issue #4604 S13: tab A writes the draft's one value (its text with the mark).
+    const marks = JSON.parse(aMarks) as RetargetTag[] | { unknown: string };
+    otherTabWritesDraft(KEY, Array.isArray(marks) ? { text: TEXT, tags: marks } : { text: TEXT, unknown: marks.unknown });
     await settle();
     // Both tabs read the roster again: X's tool changed.
     view.rerender(<One tool="claude" />);
     await settle();
-    // Tab A: asked, said yes and sent (POST 1 in A) — its text goes first, then the marks it saw.
-    otherTabWrites(KEY, null);
-    otherTabWrites(TAG_KEY, null);
+    // Tab A: asked, said yes and sent (POST 1 in A) — its value goes (its text and the marks it saw).
+    otherTabReleases(KEY);
     await settle();
     expect(ta('b').value).toBe(TEXT);
     return view;
