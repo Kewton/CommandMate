@@ -21,13 +21,13 @@
 
 | 場面 | カード（正本の節） | 参照（運用文書の節） |
 |---|---|---|
-| 着手 | [計画を人に出す前・レーンやワーカーを足す前（着手の確かめ）](roles/project-manager.md#場面ごとに必ずすること)・[重い検証（排他のロックを取るもの）の順番](roles/project-manager.md#場面ごとに必ずすること) | [team.md §7 WIP の上限とレーンの組み方](team.md#7-wip-の上限とレーンの組み方)・[team.md §10-4 重い検証の取り合い](team.md#10-開発リーダー-2-人で回す決まり段-7pm-の採用-2026-11-17)・[verify-queue.md 待ち・列・直の実行](verify-queue.md#待ち列直の実行)・[verify-queue.md 同時のワーカーの上限](verify-queue.md#同時のワーカーの上限)・[verify-queue.md 手で始める重い検証と控え・PM の保留](verify-queue.md#手で始める重い検証と控え)・[ci-merge.md 6-1-1 マシンの資源の枠](ci-merge.md#6-1-1-マシンの資源の枠resourceyaml-と-status) |
+| 着手 | [計画を人に出す前・レーンやワーカーを足す前（着手の確かめ）](roles/project-manager.md#場面ごとに必ずすること)・[重い検証（排他のロックを取るもの）の順番](roles/project-manager.md#場面ごとに必ずすること) | [team.md §7 WIP の上限とレーンの組み方](team.md#7-wip-の上限とレーンの組み方)・[team.md §10-4 重い検証の取り合い](team.md#10-開発リーダー-2-人で回す決まり段-7pm-の採用-2026-11-17)・[verify-queue.md 待ち・列・直の実行](verify-queue.md#待ち列直の実行)・[verify-queue.md 同時のワーカーの上限](verify-queue.md#同時のワーカーの上限)・[verify-queue.md 手で始める重い検証と控え・PM の保留](verify-queue.md#手で始める重い検証と控え)・[ci-merge.md 6-1-1 マシンの資源の枠](ci-merge.md#6-1-1-マシンの資源の枠resourceyaml-と-status)・[plan-check.md 1-4 Sprint の計画の欄](plan-check.md#1-4-sprint-の計画の欄)・[milestone.md Sprint と Milestone](milestone.md)・[bug-flow.md bug の流れ](bug-flow.md) |
 | 依頼 | [ワーカーに伝えたいことがあるとき](roles/project-manager.md#場面ごとに必ずすること)・[人から別件・割り込みが来たとき](roles/project-manager.md#場面ごとに必ずすること)・[タスクの書き方](roles/project-manager.md#タスクの書き方) | [team.md §2 流れ](team.md#2-流れ)・[team.md §3 ブリーフ](team.md#3-pm-から開発リーダーへのブリーフ) |
 | 見張り | [動いている間](roles/project-manager.md#場面ごとに必ずすること)・[人の答えを待つとき](roles/project-manager.md#場面ごとに必ずすること) | [team.md §8 依頼ごとの完了の見張り](team.md#8-依頼ごとの完了の見張り)・[workers.md 3-2 返しの形と見張りが起きるとき](workers.md#3-2-返しの形と見張りが起きるとき)・[ci-merge.md 6-3 マージの流れを定期的に見る](ci-merge.md#6-3-マージの流れを定期的に見る)・[workers.md 3-2 見張りが pane を読む細部](workers.md#3-2-完了の見張りが-pane-を読む細部)・[ci-merge.md 6-3 CI が queued のまま進まないとき](ci-merge.md#6-3-ci-が-queued-のまま進まないとき) |
 | 裁定 | [STOP の裁定の合間](roles/project-manager.md#場面ごとに必ずすること)（動いている間。待ち切れのときの投入の保留と順番の見直し）。場面の節の外は [判断の基準](roles/project-manager.md#判断の基準)・[進め方](roles/project-manager.md#進め方) | [team.md §6 直しとレビューを収束させる規則](team.md#6-直しとレビューを収束させる規則)・[verify-queue.md 見通しを実績の率で幅を出す](verify-queue.md#見通しを実績の率で幅を出す)・[difficulty.md 1-2b 易しい bug の速い道](difficulty.md#1-2b-易しい-bug-の速い道)・[verify-queue.md PM の保留の指示](verify-queue.md#pm-の保留の指示) |
 | マージ | 当てはまる節は無い（誰がマージを流すかは [team.md §10-3](team.md#10-開発リーダー-2-人で回す決まり段-7pm-の採用-2026-11-17)・[multi-lead.md マージの順と積み直し](multi-lead.md#マージの順と積み直し)。受け入れ中のマージの止めと再開は参照の節） | [team.md §9 受け入れ・リリースの間のマージ](team.md#受け入れリリースの間のマージ続ける止めるのは-main-への-pr-からマージバックまで)・[ci-merge.md 6-2-1](ci-merge.md#6-2-1-受け入れリリースの間の-develop-へのマージ)・[ci-merge.md 6-2 道具を変えた PR のマージの後](ci-merge.md#6-2-道具を変えた-pr-のマージの後) |
 | 受け入れ | [受け入れを頼むとき](roles/project-manager.md#場面ごとに必ずすること)・[人に確かめ（本物の環境での操作など）を頼むとき](roles/project-manager.md#場面ごとに必ずすること) | [team.md §9 受け入れのまとめ方](team.md#9-受け入れのまとめ方と計画の決まりissue-4434段-7-の決まり)・[team.md §5 UAT の結果の返し方](team.md#5-uat-の結果の返し方phase-7) |
-| 振り返り | [区切り（Sprint など）の終わり](roles/project-manager.md#場面ごとに必ずすること) | [team.md §13 Sprint・Milestone・ロードマップ](team.md#13-sprintmilestoneロードマップ人の決定-2026-11-18mem-c1bb26d2)・[history.md 運用の経緯](history.md) |
+| 振り返り | [区切り（Sprint など）の終わり](roles/project-manager.md#場面ごとに必ずすること) | [team.md §13 Sprint・Milestone・ロードマップ](team.md#13-sprintmilestoneロードマップ人の決定-2026-11-18mem-c1bb26d2)・[milestone.md Sprint を閉じる条件](milestone.md#sprint-を閉じる条件)・[history.md 運用の経緯](history.md) |
 
 ### 開発リーダー
 
@@ -72,7 +72,7 @@
 | 場面 | カード（正本の節） | 参照（運用文書の節） |
 |---|---|---|
 | 着手 | [依頼を受けたとき](roles/enabler.md#場面ごとに必ずすること)・[受ける仕事の種類](roles/enabler.md#受ける仕事の種類) | [team.md §1 役割](team.md#1-役割)・[team.md §2 流れ（高難易度の判断のレビュー）](team.md#2-流れ)・[verify-queue.md 手で始める重い検証と控え・PM の保留](verify-queue.md#手で始める重い検証と控え) |
-| 依頼 | [人の別件（割り込み）を PM から受けたとき](roles/enabler.md#場面ごとに必ずすること)・[実物を動かして確かめるとき](roles/enabler.md#場面ごとに必ずすること)・[種類ごとの出力](roles/enabler.md#種類ごとの出力) | [orchestrate.md 2-4-4 事前レビュー](../../.claude/commands/orchestrate.md#2-4-4-新しい仕組みの設計の事前レビュー)・[trials.md 2-4-4 事前レビューの書き方と記録](trials.md#2-4-4-事前レビューの書き方と記録)・[trials.md 5-2b 整合性レビューの進め方と記録](trials.md#5-2b-整合性レビューの進め方と記録) |
+| 依頼 | [人の別件（割り込み）を PM から受けたとき](roles/enabler.md#場面ごとに必ずすること)・[実物を動かして確かめるとき](roles/enabler.md#場面ごとに必ずすること)・[種類ごとの出力](roles/enabler.md#種類ごとの出力) | [orchestrate.md 2-4-4 事前レビュー](../../.claude/commands/orchestrate.md#2-4-4-新しい仕組みの設計の事前レビュー)・[trials.md 2-4-4 事前レビューの書き方と記録](trials.md#2-4-4-事前レビューの書き方と記録)・[trials.md 5-2b 整合性レビューの進め方と記録](trials.md#5-2b-整合性レビューの進め方と記録)・[bug-flow.md 2 真因・横展開・対策](bug-flow.md#2-真因横展開対策イネーブラー) |
 | 見張り | 当てはまる節は無い（イネーブラーは見張らない） | 当てはまる節は無い（見張りの参照は PM と開発リーダーのもの） |
 | 裁定 | 当てはまる節は無い（合否は出さない。[やらないこと](roles/enabler.md#やらないこと)） | [trials.md 5-2b 終了コードと記録の条件表](trials.md#5-2b-終了コードと記録の条件表) |
 | マージ | 当てはまる節は無い（マージしない。[やらないこと](roles/enabler.md#やらないこと)） | 当てはまる節は無い（イネーブラーが読むマージの参照は無い） |
@@ -95,6 +95,8 @@
 - [exit-codes.md](exit-codes.md) — exit code ごとの対処
 - [run-log.md](run-log.md) — run の記録
 - [plan-check.md](plan-check.md) — 共有状態・経路・重い検証の計画時の検査
+- [milestone.md](milestone.md) — Sprint の Milestone の割り当てと整合（team.md §13 の正本）
+- [bug-flow.md](bug-flow.md) — bug の起票から受け入れまで（team.md §13・ci-merge.md 6-2 の正本）
 - [difficulty.md](difficulty.md) — 難易度の判定（1-2b）の根拠・易しい bug の速い道（team.md §6-10）
 - [trials.md](trials.md) — 試行中の段（事前レビュー・整合性レビュー）
 - [switching.md](switching.md) — 担当の切り替え
