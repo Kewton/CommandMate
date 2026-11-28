@@ -210,7 +210,7 @@ describe('a HEAD whose heavy steps were left to CI waits for CI Unit Tests witho
 const fake0Precheck = (fake: ReturnType<typeof fakeGit>) => fake.calls.some((c) => c.command === 'npx' && c.args[0] === 'tsc');
 
 describe('without a refresh the precheck takes cpu.heavy as before (#4265 negative controls)', () => {
-  it('merge-pr without a refresh, on a HEAD with no precheck yet, waits for the lock and holds with exit 3', () => {
+  it('merge-pr without a refresh, on a HEAD whose only precheck is the tool\'s failed line, waits for the lock and holds with exit 3', () => {
     recordWork(HEAD_A, { precheck: false });
     // The options come from the work HEAD's own (failed) precheck line (#4617 run-log.mjs precheckFor, role options).
     appendRecord(runDir, '3477', { issue: 3477, stage: 'precheck', result: 'fail', head: HEAD_A, note: `tsc=fail ${OPTS}` });
