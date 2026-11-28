@@ -525,8 +525,10 @@ export function classifyEntries(o, deps) {
       continue;
     }
     // C4, C5
-    // The options of the latest tool precheck of the work HEAD, else of the HEAD (#4617 run-log.mjs precheckFor):
-    // the line merge-pr's re-run takes its options from too.
+    // The options of the latest tool precheck of the work HEAD, else of the HEAD — the train never
+    // refreshes, so this HEAD is the PR's (C2) — (#4617 run-log.mjs precheckFor): the line merge-pr's
+    // re-run takes its options from too, which falls back to the PR's HEAD from before its refresh.
+    // precheck-reader: R5
     const precheck = precheckFor(records, { issue, item, role: 'options', head, workHead });
     const optsToken = String(precheck?.note ?? '').split(/\s+/).find((word) => word.startsWith('opts='));
     if (!precheck || !optsToken) {

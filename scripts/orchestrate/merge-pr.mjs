@@ -506,6 +506,9 @@ export function mergeOne(o, deps) {
 
     // 2. The tree is what the records and the PR describe.
     let head = git(run, o.worktree, ['rev-parse', 'HEAD']).trim();
+    // The HEAD to publish as it stands, before step 4's refresh: the published HEAD the re-run's
+    // options fall back to (#4617), the one the worker's or a fold's precheck ran on.
+    const unrefreshedHead = head;
     const dirty = dirtyPaths(run, o.worktree);
     if (dirty.length > 0) {
       error(`merge #${issue}: uncommitted changes in ${o.worktree}:\n  ${dirty.join('\n  ')}`);
@@ -579,6 +582,7 @@ export function mergeOne(o, deps) {
     // environment (#3883 N9: precheck.mjs runs it again when the inputs moved).
     // precheck.mjs's own latest record of this HEAD, never a line added by hand (#4589) nor one of
     // another HEAD (#4617): the same line missingRecords judges (run-log.mjs precheckFor, role gate).
+    // precheck-reader: R2
     const headPrecheck = precheckFor(records, { issue, item, role: 'gate', head });
     const precheckEnv = headPrecheck ? verifyEnvState(headPrecheck, { runDir: o.runDir, worktree: o.worktree, home: deps.home ?? os.homedir() }) : null;
     if (precheckEnv?.state === 'unrecorded') log(`merge #${issue}: warning: precheck at ${head.slice(0, 7)}: ${precheckEnv.detail}`);
@@ -589,11 +593,13 @@ export function mergeOne(o, deps) {
       precheckEnv?.state === 'missing' ||
       deferred.length > 0
     ) {
-      // The options come from the latest tool precheck of the work HEAD; when a fold commit on top
-      // made the precheck run on the published HEAD only, from that HEAD's — never another HEAD's,
-      // and of any result: the line the worker last ran (#4617 run-log.mjs precheckFor, role options).
+      // The options come from the latest tool precheck of the work HEAD; when a fold commit or a merge
+      // of develop on top made the precheck run on the published HEAD only, from that HEAD's — the
+      // HEAD before this run's refresh, which has no precheck yet — never another HEAD's, and of any
+      // result: the line the worker last ran (#4617 run-log.mjs precheckFor, role options).
       // Without either the options would be guessed (kind lost → suppressions=skip): stop (#3527).
-      const workPrecheck = precheckFor(records, { issue, item, role: 'options', head, workHead });
+      // precheck-reader: R3
+      const workPrecheck = precheckFor(records, { issue, item, role: 'options', head: unrefreshedHead, workHead });
       if (!workPrecheck) {
         error(`merge #${issue}: no precheck=ok record to take the options from (kind etc.) — run precheck.mjs on the work HEAD first; not pushed`);
         return 1;
@@ -646,6 +652,7 @@ export function mergeOne(o, deps) {
     // 5. The checks of this HEAD.
     phase('ci-wait');
     records = readRecords(o.runDir, o.issues).records;
+    // precheck-reader: R4
     const headPrecheckNow = precheckFor(records, { issue, item, role: 'gate', head });
     const needBuild = !builtLikeCi(headPrecheckNow);
     // The verify judged at the work HEAD (step 3, or again after the refresh): whether it ran the

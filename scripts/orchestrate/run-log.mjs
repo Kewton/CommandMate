@@ -369,7 +369,8 @@ export const PRECHECK_ROLES = ['gate', 'options'];
  *     env check and its CI wait, and missingRecords read this.
  *   - `options`: the work HEAD `workHead`, else `head` (a fold on top made the
  *     precheck run on the published HEAD only) — never any other HEAD. merge-pr's
- *     re-run and the train take the options from it.
+ *     re-run and the train take the options from it; merge-pr passes as `head` the
+ *     HEAD before its own refresh (the PR's), whose merge has no precheck yet.
  * When `head` is `workHead` both roles take the same line.
  */
 export function precheckFor(records, { issue, item, role, head, workHead }) {

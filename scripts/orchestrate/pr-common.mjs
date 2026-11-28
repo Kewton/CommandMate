@@ -391,6 +391,7 @@ export function missingRecords(records, issue, heads, item, env) {
   const stages = latestByStage(records, issue, item);
   // The precheck is precheck.mjs's own latest record of the published HEAD, never a line added by
   // hand (#4589) nor a later line of another HEAD (#4617 run-log.mjs precheckFor, role gate).
+  // precheck-reader: R6
   const precheck = precheckFor(records, { issue, item, role: 'gate', head: heads.head });
   if (precheck) stages.precheck = precheck;
   else delete stages.precheck;

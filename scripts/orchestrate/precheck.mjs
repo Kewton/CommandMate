@@ -702,6 +702,7 @@ export function main(argv, deps = {}) {
     const workHead = workHeadOf(run, o.worktree, head, { records, issue, item });
     if (!o.force) {
       // precheck.mjs's own latest record of this HEAD, never a line added by hand (#4614 run-log.mjs precheckFor).
+      // precheck-reader: R1
       const previous = precheckFor(records, { issue, item, role: 'gate', head });
       if (previous && previous.result === 'ok') {
         const done = parseNote(previous.note);
