@@ -7,7 +7,11 @@ Antigravity の実測は docs/orchestrate/antigravity.md に残してある（�
 
 - 難の観点（危険な領域・設計・原因未特定・未決事項・実機でしか決まらない検証・強い依存・新規 export）に当てはまらないものは、易と中をまとめて Command Code に回す。**中**＝選択肢か手順と受入条件が本文で閉じている判断（旧 sonnet）。**新しいガード・テストを 1 本まるごと設計するものは難（opus）に残す**
 - **本文が閉じていないまま回さない。** 着手の前に、イネーブラーが Issue を「選択肢・手順・受入条件」まで具体化する
-- 仕事の **6〜8 割**を Command Code で回すのが目標。Sprint ごとにワーカーのモデルの割合を lead-return と台帳に数える
+- **回す条件（人の決定 ① 2026-11-28）**: イネーブラーが閉じた Issue で、書くファイルを契約の `scope` に名指しで並べられ、team.md §6 の 2 の高リスクの領域に触らないもの。ガード・試験を丸ごと設計するものは回さない
+- **分担**: Command Code は実装と表の試験（直す前に赤）まで。正式な verify・precheck・重い試験（`cpu.heavy`）はリーダーが流す
+- **割合**: 当面は仕事の 30〜40%。禁じたものを道具で止められるようになった後（`.commandcode/settings` の拒否・待ちの道具を経ない vitest を断る検査）に、6〜8 割を目標にする。それまで枠を広げない。Sprint ごとにワーカーのモデルの割合を lead-return と台帳に数える
+- **実験の枠**: 各 Milestone で 1〜2 本は opus 級（難）の Issue を Command Code に回す。計画の欄で名指しし（[plan-check.md の計画の欄](plan-check.md#1-4-sprint-の計画の欄)）、物差し（再指示の回数・指摘の数と種類・verify の exit・所要の時間）の表を lead-return に書く。2 回の不合格で opus に上げる決まり（3-4）はそのまま
+- **送るときの教え（11-27 夜の運用）**: send の本文にコマンドの字を入れない（ファイルに書いてパスを送る）。生成中のセッションには届かないので、入力欄が空いてから送り、画面で拾ったのを確かめる。Auto-Yes が入っていると確認の画面が素通りになる
 - 名簿の instance id は `command-code`（2 本目は `command-code-2`）。`send` / `wait` / `capture` / `respond` に `--instance command-code` を渡す
 - Claude のモデルは無い。契約の設定は `agent: command-code` で `model` を書かない（`-`）。`agent: antigravity` は契約を作らずに止まる（`contract.mjs`）
 - skill の置き場所は `.commandcode/skills` と `.agents/skills` だけで、`.claude/commands` は読まない。

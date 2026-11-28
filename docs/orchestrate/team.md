@@ -11,11 +11,11 @@ worktree `mycodebranchdesk` で動かす、このリポジトリの開発体制�
 | イネーブラー | `codex`（`codex-2`）。Codex の代わりは Claude 5（`--instance claude-5`）。Antigravity には AI から頼まない（下の「Antigravity の扱い」）（§6 の 7） | `enabler` | 設計の事前レビュー（2-4-4）・整合性レビュー（5-2b）・原因調査。読むだけ |
 | ジャッジ | `claude-2`（並行の本は新しいセッション） | `judge` | 統合した版の受け入れテスト・リグレッションテスト（UAT）。リリースごとに 1 回まとめ、独立した 2〜3 本に分けて並行し、主が結果をまとめて判定する（§9） |
 | 開発リーダー | `claude-3` | `dev-leader` | ブリーフを受けて `/orchestrate` を回す。難易度でワーカーを選ぶ。main への PR からマージバックまでのマージの停止に従い、差し戻しは持ち主として直す（§9・§10） |
-| ワーカー | Issue の worktree ごと | — | 易・中＝Command Code（#4238 のマージ後。中は 2026-11-19 から）、難＝Claude opus（Command Code がワーカー起因で 2 回不合格なら opus。sonnet は起動・送信で詰まったときの代わりだけ）。目標は仕事の 6〜8 割を Command Code |
+| ワーカー | Issue の worktree ごと | — | 易・中＝Command Code（#4238 のマージ後。中は 2026-11-19 から）、難＝Claude opus（Command Code がワーカー起因で 2 回不合格なら opus。sonnet は起動・送信で詰まったときの代わりだけ）。割合・回す条件・実験の枠は [command-code.md 1-2b](command-code.md#1-2b-command-code-に回す前提) |
 
 `claude-3` は、agent-health の自動修正ループ（Epic #3047、毎朝 08:30 の dispatch）の送り先も兼ねる。
 
-ロールの正本（`docs/orchestrate/roles/*.md`）の正はこのリポジトリ。ロールの本文を変えた後と、セッションを起動する前に `node scripts/orchestrate/roles-sync.mjs check` を流す。`differs` のときは黙って `roles edit --file` で巻き戻さず、PM へ返す（PM が人へ）。
+ロールの正本は `docs/orchestrate/roles/*.md`（人の決定 11-28）。`commandmate roles` の登録はその写しで、直に書き換えない。正本を変えた PR のマージの後に PM が `roles edit <名前> --file <正本>` で写し、`node scripts/orchestrate/roles-sync.mjs check` の exit 0 を台帳に書く。起動の前も check を流し、`differs` なら起動せず PM へ返す。
 
 ## 2. 流れ
 
@@ -145,12 +145,8 @@ mem は許可・決定・作業の状態・次の一手・人への質問の置�
 
 ## 13. Sprint・Milestone・ロードマップ（人の決定 2026-11-18、mem c1bb26d2）
 
-- 段 7 以降の段を Sprint N と呼ぶ。Sprint ごとにリリースで閉じる（リリースは人の承認）
-- 管理は GitHub の Milestone（`Sprint 7`〜`Sprint 13`）と、ロードマップの Issue #4461。Sprint の並び・理由・保留の条件・変更の履歴は #4461 に書き、Issue の割り当ては Milestone で持つ
-- 段の途中で起こす追跡の Issue は、Milestone を付けずに起票する。レビュー・受け入れの範囲の外の P3 は親の Issue の追跡の表に行で置く（ci-merge.md の 6-2 範囲の外の P3）。親の無い P3・未確認の候補は起票せず、Sprint の候補の一覧（`workspace/orchestration/runs/<日付>/followup-candidates.md`）に 1 行で足し（日時・出どころのファイル・中身・根の候補）、Sprint の計画のときに容量に合わせて選ぶ。なぜ: 次の Sprint の Milestone を自動で付けると、容量を見ずに Sprint が膨らむ（対策 5、人の承認 2026-11-21）
-- 範囲外の指摘を起票する前に、既存の根の Issue を探す。同じ根なら新しい Issue にせず、その Issue にコメントで追記する（根の候補: #4535・#4534・#4433/#4525・#4492・#4490）。develop で赤になる再現がある P1・P2 で根の無い新しい穴だけを起票し、fix の Issue には `bug` のラベルを付ける
-- Sprint に Issue を足す・外すのは人の判断（承認された範囲の変更）。PM は理由と推奨をつけて聞き、決まったら Milestone を移し、#4461 に変更をコメントで残す
-- 再起動の後は、#4461・今の Sprint の Milestone・PM の台帳（`workspace/orchestration/runs/<日付>/pm-ledger-s<N>.md`）・`commandmate brief` の順に読み直す
+- Sprint と Milestone（割り当ての段・承認の日の移し・検査を流す時点・閉じる条件・再起動の後の読み直し）の正本: [milestone.md](milestone.md)
+- 起票の基準と bug の流れ（真因・横展開・計画・まとめ方・受け入れ）の正本: [bug-flow.md](bug-flow.md)
 
 ## Antigravity の扱い
 

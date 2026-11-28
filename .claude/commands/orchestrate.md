@@ -167,7 +167,7 @@ PR の前に `node scripts/count-suppressions.mjs --base origin/develop` を走�
 
 各 Issue の本文（1-1 で取得済み）から難易度を判定し、開発担当を決める。
 **優先順位**: `--claude-only` ＞ `--assign <N>=<agent>` ＞ 下の判定表。
-**目標: 仕事の 6〜8 割を Command Code で回す**（Sprint ごとにワーカーのモデルの割合を lead-return と台帳に数える）。
+**割合（6〜8 割は道具の後）・回す条件・実験の枠**: docs/orchestrate/command-code.md 1-2b（lead-return と台帳に数える）。
 
 **Claude に回す（1 つでも当てはまれば「難」）**
 
